@@ -39,14 +39,8 @@ router = APIRouter(prefix="/api/research", tags=["research"])
 
 
 def _require_admin_in_prod(x_admin_token: str | None) -> None:
-    s = get_settings()
-    if s.debug:
-        return
-    expected = os.getenv("NORAD_ADMIN_TOKEN", "")
-    if not expected:
-        raise HTTPException(403, "research is disabled in production (NORAD_ADMIN_TOKEN not set)")
-    if not x_admin_token or x_admin_token != expected:
-        raise HTTPException(403, "research requires a valid X-Admin-Token header")
+    """Admin gate disabled — single-user tool, open in all environments."""
+    return
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────

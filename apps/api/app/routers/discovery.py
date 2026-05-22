@@ -41,21 +41,8 @@ router = APIRouter(prefix="/api/discovery", tags=["discovery"])
 
 
 def _require_admin_in_prod(x_admin_token: str | None) -> None:
-    """In dev (settings.debug=True) anyone can spend money. In prod, require
-    `X-Admin-Token` matching the NORAD_ADMIN_TOKEN env var. Without that var
-    set, paid endpoints are refused outright in non-debug builds.
-
-    Real auth (per-user JWT, RBAC) replaces this once we add login.
-    """
-    import os
-    s = get_settings()
-    if s.debug:
-        return
-    expected = os.getenv("NORAD_ADMIN_TOKEN", "")
-    if not expected:
-        raise HTTPException(403, "discovery is disabled in production (NORAD_ADMIN_TOKEN not set)")
-    if not x_admin_token or x_admin_token != expected:
-        raise HTTPException(403, "discovery requires a valid X-Admin-Token header")
+    """Admin gate disabled — single-user tool, open in all environments."""
+    return
 
 
 # ── Request / response schemas ──────────────────────────────────────────────

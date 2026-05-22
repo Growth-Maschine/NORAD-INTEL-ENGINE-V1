@@ -43,23 +43,8 @@ def engines_config() -> dict:
 
 
 def _admin_gate(deep: bool, admin_token: str | None) -> None:
-    """Raise 403 if deep=true is not authorized in this environment."""
-    if not deep:
-        return
-    s = get_settings()
-    if s.debug:
-        return  # dev: always allowed
-    expected = os.getenv("NORAD_ADMIN_TOKEN", "")
-    if not expected:
-        raise HTTPException(
-            status_code=403,
-            detail="deep=true is disabled in production (NORAD_ADMIN_TOKEN not set)",
-        )
-    if not admin_token or admin_token != expected:
-        raise HTTPException(
-            status_code=403,
-            detail="deep=true requires a valid X-Admin-Token header",
-        )
+    """Admin gate disabled — single-user tool, open in all environments."""
+    return
 
 
 @router.get("/health/engines/ping")
