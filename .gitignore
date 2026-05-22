@@ -32,8 +32,10 @@ replit.md
 .agents/
 attached_assets/
 screenshots/
-main.py
-pyproject.toml
+# Anchor with leading / so we only exclude the repo-root Replit dev
+# entrypoints, NOT apps/api/app/main.py (the real FastAPI app).
+/main.py
+/pyproject.toml
 
 # ── App-generated logs ─────────────────────────────────────────────────────
 apps/api/logs/
