@@ -1,0 +1,53 @@
+# Only the backend goes into the image. Everything else is excluded so the
+# build context stays small and the image doesn't bloat.
+
+# Frontend
+apps/web/
+
+# Docs / repo meta
+docs/
+scripts/
+README.md
+DEPLOYMENT.md
+
+# Replit-specific
+.replit
+replit.nix
+replit.md
+.config/
+.upm/
+.local/
+.agents/
+attached_assets/
+screenshots/
+main.py
+pyproject.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pythonlibs/
+.pytest_cache/
+.cache/
+
+# Node (just in case)
+node_modules/
+dist/
+.vite/
+
+# Env / secrets — NEVER ship .env into the image
+.env
+.env.local
+*.local
+apps/api/.env
+apps/api/.env.*
+apps/api/logs/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+.git/
+.gitignore
