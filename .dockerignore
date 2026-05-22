@@ -20,8 +20,10 @@ replit.md
 .agents/
 attached_assets/
 screenshots/
-main.py
-pyproject.toml
+# Anchor with leading / so we only exclude the repo-root files, NOT
+# apps/api/app/main.py (the actual FastAPI entrypoint).
+/main.py
+/pyproject.toml
 
 # Python
 __pycache__/
