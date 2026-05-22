@@ -33,4 +33,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD python -c "import urllib.request,os,sys; \
     sys.exit(0) if urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\",8000)}/health').status==200 else sys.exit(1)"
 
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Pre-import app.main so any startup ImportError / settings ValidationError
+# surfaces in Railway logs instead of being swallowed by uvicorn.
+CMD ["sh", "-c", "python -c 'import app.main; print(\"app.main imported OK\")' && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
