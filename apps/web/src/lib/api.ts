@@ -15,14 +15,24 @@ export class ApiError extends Error {
 /** Strip a trailing slash so `${BASE}${path}` doesn't double up. */
 const API_BASE = (import.meta.env.VITE_API_URL ?? "").replace(/\/+$/, "");
 
+/** Shared bearer for admin-only write routes (research/discovery/settings).
+ *  Backend requires `X-Admin-Token` matching NORAD_ADMIN_TOKEN in prod.
+ *  Bundled into the JS bundle — anyone with the URL can read it via DevTools,
+ *  so treat it as a soft gate, not a security boundary. */
+const ADMIN_TOKEN = (import.meta.env.VITE_ADMIN_TOKEN ?? "").trim();
+
 /** All routes pass through to the backend untouched. */
 export async function api<T = unknown>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
   const url = API_BASE ? `${API_BASE}${path}` : path;
+  const baseHeaders: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (ADMIN_TOKEN) baseHeaders["X-Admin-Token"] = ADMIN_TOKEN;
   const res = await fetch(url, {
-    headers: { "Content-Type": "application/json", ...(init.headers ?? {}) },
+    headers: { ...baseHeaders, ...(init.headers ?? {}) },
     ...init,
   });
   if (!res.ok) {
@@ -368,7 +378,10 @@ export function subscribeRunEvents(
   onError?: (err: Event) => void,
   onOpen?: () => void,
 ): () => void {
-  const es = new EventSource(`/api/events/runs/${runId}`);
+  const sseUrl = API_BASE
+    ? `${API_BASE}/api/events/runs/${runId}`
+    : `/api/events/runs/${runId}`;
+  const es = new EventSource(sseUrl);
   es.onopen = () => {
     if (onOpen) onOpen();
   };
