@@ -21,10 +21,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY apps/api/requirements.txt /app/requirements.txt
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# Copy the app.
-COPY apps/api /app
+# Copy the app. Explicit /app/ trailing slash + per-subdir copies so we know
+# exactly what lands where (avoids ambiguity in docker COPY semantics).
+COPY apps/api/app /app/app
+COPY apps/api/tests /app/tests
 
-# Railway injects $PORT at runtime; default to 8000 for local docker runs.
+# Make sure Python can find the `app` package regardless of CWD quirks.
+ENV PYTHONPATH=/app
 ENV PORT=8000
 EXPOSE 8000
 
