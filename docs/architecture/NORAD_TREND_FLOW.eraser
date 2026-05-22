@@ -1,0 +1,96 @@
+// =============================================================
+// NORAD — Trend Discovery & Company Intelligence Flow (v0.1)
+// Initial idea. Not final. Use this to discuss / refine.
+// =============================================================
+
+direction right
+
+// ---------- 1. SEED LAYER ----------
+Seed Layer [color: blue, icon: rss] {
+  Categories [icon: tag, label: "User Categories\n(e.g. functional beverages,\nnicotine alternatives)"]
+  Cron [icon: clock, label: "Daily Scheduler\n(6 AM)"]
+  Playwright [icon: chrome, label: "Playwright Bot\n(Trend Hunter scraper)"]
+  TrendHunter [icon: globe, label: "Trend Hunter\n(seed source)"]
+}
+
+// ---------- 2. ARTICLE PIPELINE ----------
+Article Pipeline [color: purple, icon: file-text] {
+  RawArticles [icon: database, label: "Raw Articles Store\n(title, body, images, source URL)"]
+  Dedup [icon: filter, label: "Dedup\n(URL hash → skip if seen)"]
+  Embed [icon: cpu, label: "Embed Article\n(text-embedding-3-small)"]
+}
+
+// ---------- 3. USER FEED ----------
+User Feed [color: green, icon: monitor] {
+  Feed [icon: list, label: "Daily Trend Feed\n(per user, per category)"]
+  Click [icon: mouse-pointer, label: "User clicks article\n→ triggers research"]
+}
+
+// ---------- 4. COMPANY EXTRACTION ----------
+Extract [color: yellow, icon: search] {
+  LLMExtract [icon: cpu, label: "LLM Brand Extractor\n(GPT-4o-mini)\nreturns list of brands in article"]
+}
+
+// ---------- 5. PARALLEL DEEP RESEARCH ----------
+Research [color: orange, icon: zap, label: "Parallel Deep Research\n(per extracted brand)"] {
+  ParallelAI [icon: brain, label: "Parallel AI\n(deep research)"]
+  ExaDeep [icon: search, label: "Exa Deep Research\n(deep research)"]
+  Diffbot [icon: network, label: "Diffbot KG\n(only if entity exists)"]
+  SocialFallback [icon: instagram, label: "Apify Social Fallback\n(IG / TikTok / Reddit\nif brand has no website)"]
+  Merger [icon: git-merge, label: "Result Merger\n(rank + dedup answers)"]
+}
+
+// ---------- 6. COMPANY CARDS ----------
+Cards [color: red, icon: id-card] {
+  CardBuilder [icon: layers, label: "Card Builder\n(LLM normalize merged result)"]
+  CardStore [icon: database, label: "Company Cards DB\n(brand, founders, funding,\nproducts, links, social)"]
+  CardUI [icon: monitor, label: "Company Card UI\n(detailed view)"]
+}
+
+// ---------- 7. BOOKMARK & MONITOR ----------
+Monitor [color: teal, icon: bookmark] {
+  Bookmark [icon: star, label: "User Bookmark\n(company)"]
+  Dossier [icon: folder, label: "Company Dossier\n(timeline + metrics)"]
+  MonitorQueue [icon: refresh-cw, label: "Monitoring Cron\n(news / social / regulatory)"]
+  Alerts [icon: bell, label: "Alerts\n(push / email / in-app)"]
+}
+
+// =============================================================
+// FLOWS
+// =============================================================
+
+// 1. Daily seed pull
+Cron > Playwright: "trigger"
+Categories > Playwright: "category filter"
+Playwright > TrendHunter: "scrape category pages"
+TrendHunter > Playwright: "articles + metadata"
+Playwright > Dedup: "raw articles"
+Dedup > RawArticles: "new only"
+RawArticles > Embed: "for search"
+RawArticles > Feed: "display in user feed"
+
+// 2. User interaction
+Feed > Click: "user opens article"
+Click > LLMExtract: "article text"
+LLMExtract > ParallelAI: "brand 1..N"
+LLMExtract > ExaDeep: "brand 1..N"
+LLMExtract > Diffbot: "brand 1..N"
+
+// 3. Research fan-out
+ParallelAI > Merger: "research output"
+ExaDeep > Merger: "research output"
+Diffbot > Merger: "entity record (if found)"
+Merger > SocialFallback: "if all 3 returned empty"
+SocialFallback > Merger: "social profile data"
+
+// 4. Card build
+Merger > CardBuilder: "merged brand profile"
+CardBuilder > CardStore: "structured company card"
+CardStore > CardUI: "render"
+
+// 5. Bookmark loop
+CardUI > Bookmark: "user bookmarks"
+Bookmark > Dossier: "create dossier"
+Bookmark > MonitorQueue: "add to monitoring"
+MonitorQueue > Dossier: "append new signals daily"
+Dossier > Alerts: "trigger if rule matches"

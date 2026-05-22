@@ -1,0 +1,40 @@
+# ── Python ─────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pythonlibs/
+.pytest_cache/
+.cache/
+
+# ── Node ───────────────────────────────────────────────────────────────────
+node_modules/
+dist/
+.vite/
+
+# ── Env / secrets ──────────────────────────────────────────────────────────
+.env
+.env.local
+*.local
+
+# ── Editor ─────────────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+
+# ── Replit-specific (don't ship to GitHub) ─────────────────────────────────
+.replit
+replit.nix
+replit.md
+.config/
+.upm/
+.local/
+.agents/
+attached_assets/
+screenshots/
+main.py
+pyproject.toml
+
+# ── App-generated logs ─────────────────────────────────────────────────────
+apps/api/logs/
+*.log

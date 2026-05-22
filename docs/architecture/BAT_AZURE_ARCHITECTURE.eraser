@@ -1,0 +1,103 @@
+// =============================================================
+// BAT Discovery Frontend — Azure Architecture (Simple)
+// Scope: ONLY the frontend application + Azure resources it uses
+// Tenant: BAT's own Azure tenant (BYOC)
+// Triggers: tentative — to be firmed up after BAT meeting
+// =============================================================
+// Paste into Eraser.io → New Diagram → Cloud Architecture
+
+title BAT Discovery Frontend — Azure Architecture
+
+
+// ----- TRIGGERS / INPUTS (left side) -----
+
+Triggers [color: gray, label: "Inputs that activate the system\n(tentative — pending BAT meeting)"] {
+  User NLP Query [icon: user, label: "BAT user\nNLP search in dashboard"]
+  Auto Discovery [icon: refresh, label: "Auto-discovery\n(continuous)"]
+  News Monitoring [icon: rss, label: "News monitoring\n(continuous)"]
+  Analyst Action [icon: search, label: "Manual analyst action\n('Investigate this company')"]
+}
+
+
+// ----- EXTERNAL DATA SOURCE -----
+
+NORAD [color: gray, label: "NORAD Backend\n(external)"] {
+  NORAD API [icon: api, label: "NORAD REST API\n(raw VC company discovery)"]
+}
+
+
+// ----- BAT AZURE TENANT -----
+
+BAT Azure Tenant [color: blue] {
+
+  // Edge & Identity
+  Edge [color: lightblue] {
+    Front Door [icon: azure-front-door, label: "Azure Front Door\n(WAF + DDoS + global edge)"]
+    Entra ID [icon: azure-active-directory, label: "Microsoft Entra ID\n(SSO for BAT users)"]
+  }
+
+  // Frontend
+  Frontend [color: violet] {
+    Dashboard [icon: azure-app-service, label: "Azure App Service (Web App)\nReact dashboard\n+ WebSocket-ready (future chat)"]
+  }
+
+  // Gateway
+  Gateway [color: green] {
+    APIM [icon: azure-api-management, label: "Azure API Management\nWhitelisting + JWT auth + rate limit"]
+  }
+
+  // App tier
+  App [color: orange] {
+    BFF [icon: azure-container-apps, label: "Frontend BFF\n(Container App)"]
+  }
+
+  // AI
+  AI [color: pink] {
+    Foundry [icon: azure-machine-learning, label: "Azure AI Foundry\nGrader + Rubric\n(single endpoint)"]
+  }
+
+  // Data
+  Data [color: yellow] {
+    Cosmos [icon: azure-cosmos-db, label: "Cosmos DB\n(graded VC companies + user data)"]
+    Redis [icon: azure-cache-redis, label: "Azure Cache for Redis\n(session + read cache)"]
+    Key Vault [icon: azure-key-vault, label: "Key Vault\n(NORAD key + secrets)"]
+  }
+}
+
+
+// =============================================================
+// FLOWS
+// =============================================================
+
+// User opens the dashboard
+User NLP Query > Front Door: "HTTPS"
+Front Door > Dashboard: "serve SPA"
+Dashboard > Entra ID: "SSO"
+
+// All API calls funnel through APIM
+Dashboard > APIM: "Bearer JWT"
+APIM > Entra ID: "validate JWT"
+APIM > BFF: "proxied request"
+
+// Triggers feed the BFF (the BFF is the orchestrator)
+User NLP Query > APIM: "NLP search request"
+Auto Discovery > BFF: "trigger"
+News Monitoring > BFF: "trigger"
+Analyst Action > APIM: "investigate request"
+
+// BFF fetches raw VC company data from NORAD when needed
+BFF > Key Vault: "get NORAD API key"
+BFF > NORAD API: "GET company discovery (HTTPS)"
+
+// Grader + Rubric is the FIRST processing step
+BFF > Foundry: "POST raw company\n(grader + rubric in one call)"
+Foundry > BFF: "graded + scored result"
+
+// Persist results
+BFF > Cosmos: "upsert graded company"
+BFF > Redis: "cache hot results"
+
+// Frontend reads back
+BFF > Cosmos: "read for dashboard"
+BFF > Redis: "read cache"
+BFF > Dashboard: "JSON response"
