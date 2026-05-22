@@ -20,10 +20,10 @@ replit.md
 .agents/
 attached_assets/
 screenshots/
-# Anchor with leading / so we only exclude the repo-root files, NOT
-# apps/api/app/main.py (the actual FastAPI entrypoint).
-/main.py
-/pyproject.toml
+# NOTE: do NOT add `main.py` here — docker's .dockerignore patterns
+# match anywhere in the tree and will strip apps/api/app/main.py
+# (the actual FastAPI entrypoint) out of the build context.
+# The root main.py is harmless inside the image.
 
 # Python
 __pycache__/

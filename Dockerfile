@@ -26,6 +26,10 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 COPY apps/api/app /app/app
 COPY apps/api/tests /app/tests
 
+# Fail the build LOUDLY if main.py didn't make it in (catches .dockerignore
+# mistakes etc. at build time instead of crashing in Deploy Logs).
+RUN test -f /app/app/main.py || (echo "FATAL: /app/app/main.py missing after COPY" && ls -la /app/app && exit 1)
+
 # Make sure Python can find the `app` package regardless of CWD quirks.
 ENV PYTHONPATH=/app
 ENV PORT=8000
