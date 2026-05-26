@@ -32,10 +32,12 @@ weight it. Master on/off lives in `app_kv.research_config.diffbot.enabled`.
 | # | Scope | Status |
 |---|---|---|
 | 1 | Engine plumbing — `diffbot_client.py`, `log_diffbot_call`, `_pricing.diffbot_cost_usd`, `DIFFBOT_API_KEY` in config + `.env.example`, `engine_calls.vendor` constraint extended (`sql/0001_*.sql` applied to Supabase). Smoke-tested live (Stripe match score 0.85). | ✅ Done |
-| 2 | Settings plumbing — `DiffbotConfig {enabled, score_threshold}` in `services/settings.py`; `routers/settings.py` exposes it; `app_kv` row migrated; frontend toggle in `Settings.tsx`. | ⏭ Next |
-| 3 | Stage 2 wiring — `_stage2_diffbot()` + `_derive_domain_from_exa()` helper + branched orchestration in `execute_research()`. This is where behavior changes. | ⏳ Pending |
-| 4 | Synthesizer prompt — new `## Diffbot KG evidence` block in user msg + one sentence in `_SYNTH_SYSTEM` declaring Diffbot origins eligible for `confirmed`. | ⏳ Pending |
-| 5 | Run timeline — emit `diffbot_lookup_started` / `_completed` events with `meta: {score, hits, has_entity}` so SSE feed surfaces it. | ⏳ Pending |
+| 2 | Settings plumbing — `DiffbotConfig {enabled, score_threshold}` in `services/settings.py`; `routers/settings.py` exposes it; `app_kv` row migrated (`sql/0002_*.sql` applied to Supabase); frontend Diffbot card with toggle + threshold in `Settings.tsx`. | ✅ Done |
+| 3 | Stage 2 wiring — `_stage2_diffbot()` + `_derive_domain_from_exa()` helper + branched orchestration in `execute_research()` (3-way fan-out when domain known, sequential Exa→derive→Diffbot otherwise). | ✅ Done |
+| 4 | Synthesizer prompt — `DIFFBOT KG EVIDENCE` block in user msg, third stream described in `_SYNTH_SYSTEM` with Diffbot origins eligible for `confirmed`; candidate registry now seeds Diffbot origin URLs. | ✅ Done |
+| 5 | Run timeline — `diffbot_lookup_started` / `_completed` / `_skipped` / `_domain_derived` events with `meta: {score, hits, has_entity, status, latency_ms, below_threshold}`. | ✅ Done |
+
+**All 5 steps complete.** Diffbot is now a live participant in every research run (subject to the `enabled` toggle in `/settings`).
 
 ### Decisions already made
 

@@ -313,7 +313,7 @@ function EventRow({
       initial={{ opacity: 0, x: -6 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.18, ease: "easeOut" }}
-      className="group relative flex items-start gap-3 px-4 py-2.5"
+      className="group relative flex items-start gap-3 border-b border-border/40 px-4 py-3 last:border-b-0"
     >
       {/* Timeline rail */}
       <div className="relative flex w-6 shrink-0 justify-center">
@@ -446,6 +446,69 @@ function humanize(
 
   if (k === "log") {
     return { headline: sanitize(ev.message) };
+  }
+
+  if (k === "synthesis_retry") {
+    const sigs = num(meta.signals_returned);
+    return {
+      headline: "Profile draft was thin — expanding signals",
+      sub: sigs != null ? `Only ${sigs} signal${sigs === 1 ? "" : "s"} on first pass` : undefined,
+    };
+  }
+
+  if (k === "synthesis_retry_done") {
+    const sigs = num(meta.signals_final);
+    const srcs = num(meta.sources_final);
+    return {
+      headline: "Expansion pass complete",
+      sub:
+        sigs != null && srcs != null
+          ? `${sigs} signal${sigs === 1 ? "" : "s"} · ${srcs} source${srcs === 1 ? "" : "s"}`
+          : undefined,
+    };
+  }
+
+  if (k === "signals_harvested") {
+    const n = num(meta.harvested);
+    return {
+      headline: n != null ? `Added ${n} signal${n === 1 ? "" : "s"} from research brief` : "Signals added from research brief",
+    };
+  }
+
+  if (k === "sources_backfilled") {
+    const n = num(meta.backfilled);
+    return {
+      headline: n != null ? `Attached ${n} verified source${n === 1 ? "" : "s"}` : "Sources attached",
+    };
+  }
+
+  if (k === "diffbot_lookup_started") {
+    return { headline: "Knowledge graph lookup", sub: "Matching company in Diffbot" };
+  }
+
+  if (k === "diffbot_lookup_completed") {
+    const score = ctx.score;
+    const hits = num(meta.hits);
+    const ok = meta.has_entity === true;
+    return {
+      headline: ok ? "Knowledge graph match" : "No knowledge graph match",
+      sub:
+        score != null && hits != null
+          ? `Score ${(score * 100).toFixed(0)}% · ${hits} hit${hits === 1 ? "" : "s"}`
+          : undefined,
+    };
+  }
+
+  if (k === "diffbot_lookup_skipped") {
+    return { headline: "Knowledge graph skipped", sub: "Disabled in settings" };
+  }
+
+  if (k === "diffbot_domain_derived") {
+    const d = String(meta.derived_domain || "").trim();
+    return {
+      headline: "Domain inferred from search",
+      sub: d || undefined,
+    };
   }
 
   return { headline: sanitize(ev.message) || "Event" };

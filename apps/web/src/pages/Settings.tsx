@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CircleX, Save, Loader2, Activity, Cpu, Database, Globe, Check, ChevronDown } from "lucide-react";
+import { CircleX, Save, Loader2, Activity, Cpu, Database, Globe, Check, ChevronDown, Network } from "lucide-react";
 
 import { Topbar } from "@/components/layout/Topbar";
 import { PageBody } from "@/components/ui/PageBody";
@@ -69,7 +69,11 @@ export default function Settings() {
   const save = useMutation({
     mutationFn: async () => {
       if (!draft) throw new Error("no draft");
-      return updateResearchConfig({ parallel: draft.parallel, exa: draft.exa });
+      return updateResearchConfig({
+        parallel: draft.parallel,
+        exa: draft.exa,
+        diffbot: draft.diffbot,
+      });
     },
     onSuccess: (next) => {
       queryClient.setQueryData(["research-config"], next);
@@ -271,6 +275,53 @@ export default function Settings() {
                   <Hint text="Deep search ignores this and chooses dynamically." />
                 </Field>
               </EngineCard>
+
+              <EngineCard
+                title="Diffbot Knowledge Graph"
+                subtitle="Pre-structured org records (~150 fields) with origin URLs per fact."
+                icon={Network}
+                accent="emerald"
+                className="lg:col-span-2"
+              >
+                <Field label="Enabled">
+                  <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-white px-3 py-2">
+                    <span className="text-sm text-ink">
+                      {draft.diffbot.enabled ? "Calling Diffbot on every research run" : "Skipping Diffbot — Parallel + Exa only"}
+                    </span>
+                    <Toggle
+                      checked={draft.diffbot.enabled}
+                      onChange={(v) =>
+                        setDraft({
+                          ...draft,
+                          diffbot: { ...draft.diffbot, enabled: v },
+                        })
+                      }
+                    />
+                  </div>
+                  <Hint text="Master kill-switch. When off, Stage 2 won't enqueue a Diffbot lookup." />
+                </Field>
+                <Field label="Score threshold">
+                  <input
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={draft.diffbot.score_threshold}
+                    onChange={(e) => {
+                      const raw = Number(e.target.value);
+                      const clamped = Number.isFinite(raw)
+                        ? Math.min(1, Math.max(0, raw))
+                        : 0;
+                      setDraft({
+                        ...draft,
+                        diffbot: { ...draft.diffbot, score_threshold: clamped },
+                      });
+                    }}
+                    className="w-full rounded-md border border-border bg-white px-3 py-1.5 text-sm text-ink focus:border-ink focus:outline-none"
+                  />
+                  <Hint text="Match confidence cutoff (0.0–1.0). 0.0 = no gating — let the synthesizer weigh every hit by its score." />
+                </Field>
+              </EngineCard>
             </div>
           )}
           </div>
@@ -347,38 +398,40 @@ function EngineCard({
   subtitle,
   icon: Icon,
   accent,
+  className,
   children,
 }: {
   title: string;
   subtitle: string;
   icon: typeof Cpu;
-  accent: "accent" | "navy";
+  accent: "accent" | "navy" | "emerald";
+  className?: string;
   children: React.ReactNode;
 }) {
+  const bar =
+    accent === "accent"
+      ? "bg-accent"
+      : accent === "navy"
+        ? "bg-navy"
+        : "bg-emerald-500";
+  const iconWrap =
+    accent === "accent"
+      ? "bg-accent/10 ring-accent/20"
+      : accent === "navy"
+        ? "bg-navy/5 ring-navy/15"
+        : "bg-emerald-50 ring-emerald-100";
+  const iconColor =
+    accent === "accent"
+      ? "text-accent"
+      : accent === "navy"
+        ? "text-navy"
+        : "text-emerald-600";
   return (
-    <div className="relative overflow-hidden rounded-xl border border-border bg-white p-5 shadow-soft">
-      <span
-        aria-hidden
-        className={cn(
-          "absolute inset-x-0 top-0 h-0.5",
-          accent === "accent" ? "bg-accent" : "bg-navy",
-        )}
-      />
+    <div className={cn("relative overflow-hidden rounded-xl border border-border bg-white p-5 shadow-soft", className)}>
+      <span aria-hidden className={cn("absolute inset-x-0 top-0 h-0.5", bar)} />
       <div className="flex items-start gap-2.5">
-        <div
-          className={cn(
-            "grid h-7 w-7 shrink-0 place-items-center rounded-md ring-1",
-            accent === "accent"
-              ? "bg-accent/10 ring-accent/20"
-              : "bg-navy/5 ring-navy/15",
-          )}
-        >
-          <Icon
-            className={cn(
-              "h-3.5 w-3.5",
-              accent === "accent" ? "text-accent" : "text-navy",
-            )}
-          />
+        <div className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-md ring-1", iconWrap)}>
+          <Icon className={cn("h-3.5 w-3.5", iconColor)} />
         </div>
         <div className="min-w-0">
           <div className="text-sm font-semibold text-ink">{title}</div>
@@ -569,4 +622,32 @@ function Select({
 function Hint({ text }: { text?: string }) {
   if (!text) return null;
   return <p className="text-[11px] leading-relaxed text-muted">{text}</p>;
+}
+
+function Toggle({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors",
+        checked ? "bg-emerald-500" : "bg-border",
+      )}
+    >
+      <span
+        className={cn(
+          "inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform",
+          checked ? "translate-x-[18px]" : "translate-x-0.5",
+        )}
+      />
+    </button>
+  );
 }

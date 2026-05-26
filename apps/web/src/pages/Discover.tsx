@@ -143,9 +143,8 @@ export default function Discover() {
         trend_article_id: article.id,
       }),
     onSuccess: (r, vars) => {
-      toast.success(`Research started on ${vars.company}`, {
-        description: "Building the company profile in the background.",
-      });
+      // The ResearchCountdown banner is the sole confirmation — skip a
+      // Sonner toast here or the two stack at the bottom and overlap.
       setPendingResearch(null);
       setCountdown({ runId: r.run_id, company: vars.company });
     },

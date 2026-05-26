@@ -52,7 +52,7 @@ export function ResearchCountdown({
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: 20 }}
         transition={{ type: "spring", stiffness: 320, damping: 28 }}
-        className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2"
+        className="fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 pb-[env(safe-area-inset-bottom)]"
         role="status"
         aria-live="polite"
       >
@@ -61,6 +61,9 @@ export function ResearchCountdown({
             "relative w-[min(92vw,460px)] overflow-hidden rounded-xl",
             "border border-slate-700/70 bg-gradient-to-b from-slate-900 to-slate-800",
             "text-white shadow-[0_24px_60px_-20px_rgba(15,23,42,0.7)]",
+            // Breathing room so this never sits flush against Sonner toasts
+            // (bottom-right) or the viewport edge when multiple notices fire.
+            "mb-1",
           )}
         >
           <div className="flex items-center gap-3 px-4 py-3">

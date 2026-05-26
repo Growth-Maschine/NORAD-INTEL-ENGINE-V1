@@ -4,21 +4,29 @@ For one chosen company, this service runs the full Company-Card synthesis:
 
     Stage 1  build_input            — read trend_article context (if any),
                                        normalize company name + domain hint
-    Stage 2  fan_out (gather)       — Parallel Task API  +  Exa search/contents
-                                       fire in parallel; either alone is enough
-                                       to proceed, only both-failed kills the run
-    Stage 3  synthesize             — Claude Sonnet merges structured Parallel
-                                       output + Exa snippets into one validated
-                                       CompanyCardV1 via tool_use
+    Stage 2  fan_out (gather)       — Parallel + Exa + Diffbot KG run together.
+                                       When `domain_hint` is known up front all
+                                       three fan out concurrently; otherwise
+                                       Parallel + Exa fire in parallel, we wait
+                                       for Exa, derive a likely domain from its
+                                       URLs, then call Diffbot with that hint
+                                       (or name-only if Exa was empty). Any one
+                                       engine failing never kills the run.
+    Stage 3  synthesize             — Claude Sonnet merges Parallel brief + Exa
+                                       snippets + Diffbot KG entity into one
+                                       validated CompanyCardV1 via tool_use.
+                                       Diffbot origin URLs are eligible for
+                                       `confidence="confirmed"` cites.
     Stage 4  persist                — upsert Company → insert Card → backfill
                                        Signals + Sources → flip Run to completed,
                                        point Company.canonical_card_id at the
                                        fresh card
 
-Cost shape (default config: Parallel `pro` + Exa `deep` + Sonnet 4.5):
+Cost shape (default config: Parallel `pro` + Exa `deep` + Diffbot KG + Sonnet 4.5):
     Parallel pro       ≈ $2.50  / run  (flat per task, processor=pro)
     Exa deep search    ≈ $0.01  / run  (2 deep searches @ $0.005 ea)
     Exa get_contents   ≈ $0.025 / run  (~5 URLs @ $0.005 ea)
+    Diffbot Enhance    ≈ $0.00  / run  (plan-bundled — see _pricing.diffbot_*)
     Claude Sonnet 4.5  ≈ $0.30-0.50 / run  (varies with parallel JSON size)
     ─────────────────────────────────────────────────────
     ≈ $2.80 - $3.10 / company
@@ -27,8 +35,9 @@ Switching Parallel back to `core` ($1.00) drops total to ≈ $1.30 / company.
 Configurable from /settings (persisted in app_kv research_config).
 
 Notes on robustness:
-    * Both engines independently catch their own errors; a half-result still
-      produces a card (with `confidence="unknown"` on the missing block).
+    * Each engine independently catches its own errors; a half-result still
+      produces a card (with `confidence="unknown"` on the missing blocks).
+      Only an all-three-failed Stage 2 kills the run.
     * Pydantic validation is the contract. If the synthesizer returns garbage,
       the run is failed with a `synthesis_failed` event — no orphan card.
     * Tier-C fields are auto-stubbed by `CompanyCardV1` defaults — the engines
@@ -39,6 +48,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from typing import TYPE_CHECKING
 
@@ -54,10 +64,21 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
 from app.core.db import get_session_factory
-from app.engines import get_claude_client, get_exa_client, get_parallel_client
+from app.engines import (
+    get_claude_client,
+    get_diffbot_client,
+    get_exa_client,
+    get_parallel_client,
+)
 from app.engines.claude_client import ClaudeMessage
+from app.engines.diffbot_client import DiffbotEnhanceResponse
 from app.engines.exa_client import ExaCallStats, ExaContent
-from app.engines.logging import log_claude_call, log_exa_call, log_parallel_call
+from app.engines.logging import (
+    log_claude_call,
+    log_diffbot_call,
+    log_exa_call,
+    log_parallel_call,
+)
 from app.engines.parallel_client import ParallelTaskResponse
 from app.models import Card, Company, Run, Signal, Source, TrendArticle
 from app.schemas import CompanyCardV1, get_contract_schema
@@ -146,27 +167,74 @@ async def execute_research(run_id: uuid.UUID, p: ResearchParams) -> ResearchResu
             meta={"stage": 1, "has_article_ctx": bool(article_ctx)},
         )
 
-        # ── Stage 2: fan-out (Parallel + Exa) ─────────────────────────────
-        await emit(
-            run_id, "stage_started",
-            "Stage 2 — Parallel Task + Exa research (parallel)",
-            meta={"stage": 2},
+        # ── Stage 2: fan-out (Parallel + Exa + Diffbot) ───────────────────
+        # Branched sequencing per Diffbot integration plan:
+        #   * domain_hint known up front → fan out all three concurrently
+        #     (Parallel ‖ Exa ‖ Diffbot[url=domain_hint])
+        #   * no domain_hint → start Parallel + Exa concurrently, await Exa,
+        #     derive a likely domain from its URLs, then fire Diffbot with
+        #     that hint. Falls back to name-only Diffbot if Exa yielded
+        #     nothing usable. Parallel keeps running through all of this and
+        #     is awaited at the end.
+        if p.domain_hint:
+            await emit(
+                run_id, "stage_started",
+                f"Stage 2 — Parallel + Exa + Diffbot (domain={p.domain_hint!r}, fan-out)",
+                meta={"stage": 2, "diffbot_mode": "fan_out", "domain_hint": p.domain_hint},
+            )
+            parallel_resp, exa_bundle, diffbot_resp = await asyncio.gather(
+                _stage2_parallel(run_id, p, article_ctx, factory, cfg),
+                _stage2_exa(run_id, p, factory, cfg),
+                _stage2_diffbot(run_id, p, factory, cfg, url_hint=p.domain_hint),
+                return_exceptions=False,  # each inner fn never raises
+            )
+            derived_domain: str | None = None
+        else:
+            await emit(
+                run_id, "stage_started",
+                "Stage 2 — Parallel + Exa first, Diffbot after Exa-derived domain",
+                meta={"stage": 2, "diffbot_mode": "sequential", "domain_hint": None},
+            )
+            # Start Parallel as a background task — it can run for 5-10 minutes
+            # under the `pro` processor, so we don't want to block on it just
+            # to feed Diffbot a domain hint.
+            parallel_task = asyncio.create_task(
+                _stage2_parallel(run_id, p, article_ctx, factory, cfg)
+            )
+            try:
+                exa_bundle = await _stage2_exa(run_id, p, factory, cfg)
+                derived_domain = _derive_domain_from_exa(exa_bundle, p.company_name)
+                if derived_domain:
+                    await emit(
+                        run_id, "diffbot_domain_derived",
+                        f"Derived domain {derived_domain!r} from Exa results.",
+                        meta={"stage": 2, "derived_domain": derived_domain},
+                    )
+                diffbot_resp = await _stage2_diffbot(
+                    run_id, p, factory, cfg, url_hint=derived_domain
+                )
+                parallel_resp = await parallel_task
+            except BaseException:
+                # Make sure Parallel doesn't keep running detached if we
+                # bail out before awaiting it. (asyncio.create_task pins it
+                # to the loop; cancellation is best-effort.)
+                if not parallel_task.done():
+                    parallel_task.cancel()
+                raise
+        total_cost += (
+            parallel_resp.cost_usd + exa_bundle.cost_usd + diffbot_resp.cost_usd
         )
-        parallel_resp, exa_bundle = await asyncio.gather(
-            _stage2_parallel(run_id, p, article_ctx, factory, cfg),
-            _stage2_exa(run_id, p, factory, cfg),
-            return_exceptions=False,  # each inner fn never raises
-        )
-        total_cost += parallel_resp.cost_usd + exa_bundle.cost_usd
 
         parallel_ok = parallel_resp.succeeded and isinstance(
             parallel_resp.output_json, dict
         )
         exa_ok = bool(exa_bundle.contents)
-        if not parallel_ok and not exa_ok:
+        diffbot_ok = diffbot_resp.succeeded  # gated entity record
+        if not parallel_ok and not exa_ok and not diffbot_ok:
             raise RuntimeError(
-                "both engines failed: "
-                f"parallel={parallel_resp.error}; exa=no contents"
+                "all engines failed: "
+                f"parallel={parallel_resp.error}; exa=no contents; "
+                f"diffbot={diffbot_resp.error or 'no entity'}"
             )
 
         await _update_run(factory, run_id, progress=55, status="synthesizing")
@@ -174,13 +242,18 @@ async def execute_research(run_id: uuid.UUID, p: ResearchParams) -> ResearchResu
             run_id, "stage_completed",
             f"Stage 2 — Parallel {'OK' if parallel_ok else 'FAIL'} "
             f"(${parallel_resp.cost_usd:.3f}), Exa {len(exa_bundle.contents)} reads "
-            f"(${exa_bundle.cost_usd:.3f})",
+            f"(${exa_bundle.cost_usd:.3f}), Diffbot "
+            f"{'HIT' if diffbot_ok else 'MISS'} (score={diffbot_resp.score:.2f})",
             meta={
                 "stage": 2,
                 "parallel_ok": parallel_ok,
                 "exa_reads": len(exa_bundle.contents),
                 "parallel_cost": parallel_resp.cost_usd,
                 "exa_cost": exa_bundle.cost_usd,
+                "diffbot_ok": diffbot_ok,
+                "diffbot_score": diffbot_resp.score,
+                "diffbot_hits": diffbot_resp.hits,
+                "diffbot_cost": diffbot_resp.cost_usd,
             },
         )
 
@@ -191,7 +264,7 @@ async def execute_research(run_id: uuid.UUID, p: ResearchParams) -> ResearchResu
             meta={"stage": 3},
         )
         card_dict, claude_cost = await _stage3_synthesize(
-            run_id, p, article_ctx, parallel_resp, exa_bundle, factory
+            run_id, p, article_ctx, parallel_resp, exa_bundle, diffbot_resp, factory, cfg
         )
         total_cost += claude_cost
         card_dict = _sanitize_card_dict(card_dict)
@@ -614,7 +687,13 @@ async def _stage2_exa(
             {"urls": top_urls},
             {
                 "fetched": [
-                    {"url": c.url, "title": c.title, "chars": len(c.text or "")}
+                    {
+                        "url": c.url,
+                        "title": c.title,
+                        "chars": len(c.text or ""),
+                        "text_preview": (c.text or "")[:2000] or None,
+                        "published_date": c.published_date,
+                    }
                     for c in contents
                 ],
             },
@@ -643,13 +722,188 @@ def _guess_domain(name: str) -> str | None:
     return f"{slug}.com" if 2 <= len(slug) <= 40 else None
 
 
+# ── Stage 2c: Diffbot Knowledge Graph ────────────────────────────────────────
+
+# Hosts that are NEVER useful as a derived "this is the company's domain"
+# signal — they're aggregators / press / social, not the org itself.
+# Used by `_derive_domain_from_exa()`.
+_DOMAIN_DERIVE_BLOCKLIST = {
+    "linkedin.com", "twitter.com", "x.com", "facebook.com", "youtube.com",
+    "instagram.com", "tiktok.com", "github.com", "medium.com",
+    "crunchbase.com", "pitchbook.com", "tracxn.com", "owler.com",
+    "wikipedia.org", "wikidata.org",
+    "techcrunch.com", "bloomberg.com", "reuters.com", "wsj.com",
+    "ft.com", "forbes.com", "businesswire.com", "prnewswire.com",
+    "nytimes.com", "theinformation.com", "axios.com", "venturebeat.com",
+    "trendhunter.com", "producthunt.com",
+    "google.com", "bing.com", "duckduckgo.com",
+}
+
+
+def _derive_domain_from_exa(
+    exa_bundle: "_ExaBundle",
+    company_name: str,
+) -> str | None:
+    """Pick a likely company domain from Exa's fetched URLs.
+
+    Heuristic, in order:
+      1. Most-frequent non-blocklisted host across the Exa contents. Ties
+         broken by URL ordering (preserves Exa's relevance ranking).
+      2. If the top host contains the company-name slug (lowercased,
+         alphanumeric only), prefer it strongly — that's almost certainly
+         the homepage.
+    Returns `None` if Exa returned nothing usable; the caller should fall
+    back to name-only Diffbot in that case.
+    """
+    if not exa_bundle.contents:
+        return None
+
+    slug = "".join(c.lower() for c in company_name if c.isalnum())
+    counts: dict[str, int] = {}
+    name_match: str | None = None
+    for c in exa_bundle.contents:
+        if not c.url:
+            continue
+        try:
+            host = urlparse(c.url).netloc.lower()
+        except Exception:
+            continue
+        if host.startswith("www."):
+            host = host[4:]
+        if not host or "." not in host:
+            continue
+        # Strip aggregators / press — these mention the company, they aren't it.
+        if any(host == h or host.endswith("." + h) for h in _DOMAIN_DERIVE_BLOCKLIST):
+            continue
+        counts[host] = counts.get(host, 0) + 1
+        # Strong signal: host's bare-name segment contains the company slug
+        # (e.g. company "Stripe" + host "stripe.com" → instant win).
+        if name_match is None and slug and len(slug) >= 3:
+            bare = host.split(".")[0]
+            if slug in bare or bare in slug:
+                name_match = host
+
+    if name_match:
+        return name_match
+    if not counts:
+        return None
+    # Most-frequent wins; preserves first-seen order on ties (insertion order).
+    return max(counts.items(), key=lambda kv: kv[1])[0]
+
+
+async def _stage2_diffbot(
+    run_id: uuid.UUID,
+    p: ResearchParams,
+    factory: async_sessionmaker[AsyncSession],
+    cfg: "ResearchConfig",
+    *,
+    url_hint: str | None = None,
+) -> DiffbotEnhanceResponse:
+    """Call Diffbot KG Enhance for `p.company_name`, with `url_hint` if known.
+
+    `url_hint` should be a bare domain (e.g. "stripe.com") — pass either
+    `p.domain_hint` (when known up front), the result of
+    `_derive_domain_from_exa()` (when Exa filled it in), or None to let
+    Diffbot do a name-only lookup.
+
+    Behavior:
+      * Master kill-switch: when `cfg.diffbot.enabled` is False, returns a
+        synthetic `status='ok'` / `hits=0` / `entity=None` response without
+        touching the network or writing to `engine_calls`. The synthesizer
+        treats this exactly like a Diffbot miss.
+      * Emits `diffbot_lookup_started` and `diffbot_lookup_completed`
+        run_events with score/hits/has_entity in `meta` so the SSE feed
+        surfaces what happened on the timeline.
+      * Never raises — failures fold into the response object (status='error'
+        or 'timeout') so the orchestrator keeps moving.
+      * Always logs the call to `engine_calls` (unless gated off).
+    """
+    if not cfg.diffbot.enabled:
+        await emit(
+            run_id, "diffbot_lookup_skipped",
+            "Diffbot disabled in settings — skipping KG lookup.",
+            level="info",
+            meta={"stage": 2, "reason": "disabled_in_settings"},
+        )
+        return DiffbotEnhanceResponse(status="ok", hits=0)
+
+    await emit(
+        run_id, "diffbot_lookup_started",
+        f"Diffbot KG: looking up {p.company_name!r}"
+        + (f" (url={url_hint})" if url_hint else " (name-only)"),
+        meta={
+            "stage": 2,
+            "company_name": p.company_name,
+            "url_hint": url_hint,
+        },
+    )
+
+    client = get_diffbot_client()
+    resp = await client.enhance_organization(
+        name=p.company_name,
+        url=url_hint,
+    )
+
+    async with factory() as s:
+        await log_diffbot_call(
+            s, resp, operation="enhance", run_id=run_id,
+            meta={"company_name": p.company_name},
+        )
+
+    # Optional score gate (kept here, not in the synthesizer prompt, so the
+    # default of `0.0` is a pure no-op). If the operator raised the threshold
+    # in /settings and Diffbot's match score sits below it, treat the call as
+    # a miss for synthesis purposes — we still keep the engine_calls row above
+    # for auditing.
+    score_ok = resp.score >= cfg.diffbot.score_threshold
+    suppressed_below_threshold = bool(
+        resp.succeeded and not score_ok and cfg.diffbot.score_threshold > 0.0
+    )
+    effective_succeeded = resp.succeeded and score_ok
+
+    await emit(
+        run_id, "diffbot_lookup_completed",
+        (
+            f"Diffbot {'HIT' if effective_succeeded else 'MISS'} — "
+            f"score={resp.score:.2f}, hits={resp.hits}, "
+            f"latency={resp.latency_ms:.0f}ms"
+            + (f" (below threshold {cfg.diffbot.score_threshold:.2f})"
+               if suppressed_below_threshold else "")
+        ),
+        level="warn" if resp.status != "ok" else "info",
+        meta={
+            "stage": 2,
+            "score": resp.score,
+            "hits": resp.hits,
+            "has_entity": resp.entity is not None,
+            "status": resp.status,
+            "latency_ms": resp.latency_ms,
+            "score_threshold": cfg.diffbot.score_threshold,
+            "below_threshold": suppressed_below_threshold,
+        },
+    )
+
+    # If we suppressed below threshold, return an effective-miss response so
+    # downstream synthesis treats it like Diffbot had nothing for us.
+    if suppressed_below_threshold:
+        return DiffbotEnhanceResponse(
+            status="ok",
+            hits=0,
+            kg_version=resp.kg_version,
+            cost_usd=resp.cost_usd,
+            latency_ms=resp.latency_ms,
+            request_params=resp.request_params,
+        )
+    return resp
+
+
 # ── Stage 3: Claude synthesizer ──────────────────────────────────────────────
 
 
 _SYNTH_SYSTEM = """You are the NORAD research synthesizer.
 
 Your job: produce ONE high-quality CompanyCardV1 JSON describing the target \
-company, by merging two evidence streams:
+company, by merging THREE evidence streams:
 
 1. PARALLEL — a COMPACT evidence brief (identity, funding, signals, sources) \
 returned by an agentic web-research engine. This is NOT the full CompanyCardV1 \
@@ -659,6 +913,19 @@ people_and_decision_map, strategic_fit, scores, etc.).
 2. EXA — raw text snippets from 3-8 web pages we crawled in real time. Use \
 these to add detail, attribute sources, and override Parallel where Exa \
 disagrees clearly.
+3. DIFFBOT KG — a pre-structured Organization record from Diffbot's knowledge \
+graph (~150 fields: founders, employees, funding, competitors, categories, \
+HQ, etc.) PLUS a `score` between 0 and 1 indicating Diffbot's confidence \
+that the entity it matched is actually the target company. Each Diffbot \
+fact carries one or more **origin URLs** — the pages Diffbot crawled to \
+extract that fact. Treat Diffbot origin URLs as first-party provenance: \
+facts cited to those origins are eligible for `confidence="confirmed"`. \
+Diffbot may be empty (`Diffbot MISS`) — in that case ignore this stream. \
+When Diffbot disagrees with Parallel/Exa on a fact, weigh Diffbot more \
+heavily as `score` approaches 1.0, less heavily as it approaches 0.5, and \
+prefer Exa below that. Never assume Diffbot's match is correct just because \
+it returned a hit — cross-check identity (domain, HQ, founder names) before \
+trusting its facts.
 
 Rules (these are absolute):
 - Return the card via the synthesize_company_card tool. Do not include any \
@@ -746,22 +1013,620 @@ def _infer_trust_tier(url: str) -> str:
     return "C"
 
 
+# How many Diffbot origin URLs to surface in the candidate registry. Diffbot
+# entities can carry dozens of origins; we cap to keep the prompt token-bounded.
+_DIFFBOT_MAX_ORIGINS = 6
+# How many Diffbot competitors to list in the evidence block (66 for Stripe
+# in our smoke test — synthesizer prompt would balloon if we sent them all).
+_DIFFBOT_MAX_COMPETITORS = 10
+
+
+def _diffbot_origin_urls(entity: dict[str, Any] | None) -> list[str]:
+    """Pull origin URLs from a Diffbot entity record.
+
+    Diffbot exposes origins under a few different keys depending on the
+    KG version and entity type. We try them in order of specificity:
+      - `origins` (plural list of URLs)
+      - `origin` (sometimes a single URL string)
+      - `allUris` (catch-all uri list incl. wiki/crunchbase/etc.)
+      - `homepageUri` (last resort — the company's own homepage)
+    Returns a deduped, order-preserving list capped at `_DIFFBOT_MAX_ORIGINS`.
+    """
+    if not isinstance(entity, dict):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _push(u: Any) -> None:
+        if not isinstance(u, str):
+            return
+        u = u.strip()
+        if not u or not (u.startswith("http://") or u.startswith("https://")):
+            return
+        norm = u.lower().rstrip("/")
+        if norm in seen:
+            return
+        seen.add(norm)
+        out.append(u)
+
+    origins = entity.get("origins") or entity.get("allOriginHashes") or []
+    if isinstance(origins, list):
+        for o in origins:
+            _push(o)
+    _push(entity.get("origin"))
+    all_uris = entity.get("allUris") or []
+    if isinstance(all_uris, list):
+        for u in all_uris:
+            _push(u)
+    _push(entity.get("homepageUri"))
+    return out[:_DIFFBOT_MAX_ORIGINS]
+
+
+def _render_diffbot_evidence(resp: DiffbotEnhanceResponse) -> str:
+    """Render a compact, Claude-readable summary of a Diffbot entity.
+
+    We deliberately do NOT json-dump the raw entity — it's ~150 fields, many
+    of them nested arrays (competitors at 66 entries for Stripe in our smoke
+    test). Instead we pick the high-signal ones and label them so the
+    synthesizer can map them directly onto CompanyCardV1 fields.
+
+    Always safe to call: on miss / disabled / error, returns a single-line
+    explanation rather than failing — the user message includes the block
+    unconditionally so prompt structure stays stable across runs.
+    """
+    if resp.status == "timeout":
+        return "(Diffbot lookup timed out — no KG evidence available)"
+    if resp.status == "error":
+        return f"(Diffbot lookup errored: {resp.error or 'unknown'} — no KG evidence available)"
+    if not resp.succeeded:
+        return (
+            f"(Diffbot MISS — no entity matched. score={resp.score:.2f}, "
+            f"hits={resp.hits}. Skip this stream.)"
+        )
+
+    e = resp.entity or {}
+    lines: list[str] = [
+        f"Match score: {resp.score:.2f} (hits={resp.hits})",
+    ]
+
+    def _add(label: str, value: Any) -> None:
+        if value in (None, "", [], {}):
+            return
+        if isinstance(value, list):
+            value = ", ".join(str(v) for v in value if v not in (None, ""))
+            if not value:
+                return
+        lines.append(f"  {label}: {value}")
+
+    _add("Name", e.get("name") or e.get("fullName"))
+    _add("Aka", e.get("nameAlt"))
+    desc = e.get("description") or ""
+    if isinstance(desc, str) and desc:
+        _add("Description", desc[:600])
+    _add("Homepage", e.get("homepageUri"))
+    _add("HQ", _fmt_address(e.get("address")) or e.get("location", {}).get("address") if isinstance(e.get("location"), dict) else None)
+    _add("Founded", _fmt_field_str(e.get("foundingDate")))
+    _add("Is public", e.get("isPublic"))
+    _add("Stock symbol", _fmt_field_str(e.get("stock")))
+    _add("Employees", _fmt_field_int(e.get("nbEmployees")) or e.get("nbEmployeesMax") or e.get("nbEmployeesMin"))
+    founders = e.get("founders") or []
+    if isinstance(founders, list):
+        names = [f.get("name") for f in founders if isinstance(f, dict) and f.get("name")]
+        if names:
+            _add("Founders", names[:6])
+    ceo = e.get("ceo")
+    if isinstance(ceo, dict):
+        _add("CEO", ceo.get("name"))
+    elif isinstance(ceo, str):
+        _add("CEO", ceo)
+    industries = e.get("industries") or []
+    if isinstance(industries, list):
+        names = [i.get("name") if isinstance(i, dict) else i for i in industries]
+        _add("Industries", [n for n in names if n][:6])
+    categories = e.get("categories") or []
+    if isinstance(categories, list):
+        names = [c.get("name") if isinstance(c, dict) else c for c in categories]
+        _add("Categories", [n for n in names if n][:6])
+    parent = e.get("parentCompany")
+    if isinstance(parent, dict):
+        _add("Parent", parent.get("name"))
+    competitors = e.get("competitors") or []
+    if isinstance(competitors, list):
+        names = [c.get("name") if isinstance(c, dict) else c for c in competitors]
+        names = [n for n in names if n][:_DIFFBOT_MAX_COMPETITORS]
+        if names:
+            _add(f"Competitors (top {_DIFFBOT_MAX_COMPETITORS})", names)
+    funding = e.get("investments") or []
+    if isinstance(funding, list) and funding:
+        # Just count + most recent if shape is known.
+        _add("Funding rounds (count)", len(funding))
+    _add("Wikipedia", e.get("wikipediaUri"))
+    _add("Crunchbase", e.get("crunchbaseUri"))
+    _add("LinkedIn", e.get("linkedInUri"))
+
+    origins = _diffbot_origin_urls(e)
+    if origins:
+        lines.append(
+            f"  Diffbot origins ({len(origins)} URLs — first-party "
+            "provenance, eligible for confidence=confirmed):"
+        )
+        for u in origins:
+            lines.append(f"    - {u}")
+
+    return "\n".join(lines)
+
+
+def _fmt_field_str(v: Any) -> str | None:
+    """Diffbot often wraps scalars as `{value: ..., precision: ..., str: ...}`."""
+    if isinstance(v, dict):
+        return v.get("str") or v.get("value") or None
+    if isinstance(v, str):
+        return v or None
+    return None
+
+
+def _fmt_field_int(v: Any) -> int | None:
+    if isinstance(v, dict):
+        val = v.get("value")
+        if isinstance(val, (int, float)):
+            return int(val)
+    if isinstance(v, (int, float)):
+        return int(v)
+    return None
+
+
+def _fmt_address(a: Any) -> str | None:
+    if not isinstance(a, dict):
+        return None
+    parts = [
+        a.get("street"),
+        a.get("city"),
+        a.get("region") or a.get("regionName"),
+        a.get("country") or a.get("countryName"),
+    ]
+    s = ", ".join(p for p in parts if p)
+    return s or None
+
+
+def _unwrap_parallel_output(
+    output: dict[str, Any] | None,
+) -> tuple[dict[str, Any], list[Any]]:
+    """Parallel Task API v2 wraps the schema in `{type, basis, content}`."""
+    if not isinstance(output, dict):
+        return {}, []
+    content = output.get("content")
+    basis = output.get("basis") or []
+    if isinstance(content, dict):
+        return content, basis if isinstance(basis, list) else []
+    return output, basis if isinstance(basis, list) else []
+
+
+_NAME_STOPWORDS = frozenset({
+    "therapeutics", "health", "healthcare", "wellness", "labs", "lab",
+    "inc", "corp", "corporation", "company", "co", "group", "holdings",
+    "the", "and", "for",
+})
+
+
+def _normalize_domain(d: str | None) -> str | None:
+    if not d or not isinstance(d, str):
+        return None
+    d = d.strip().lower()
+    if d.startswith("http"):
+        d = urlparse(d).netloc or d
+    d = d.removeprefix("www.")
+    return d.split("/")[0] or None
+
+
+def _name_tokens(name: str) -> set[str]:
+    return {
+        t for t in re.sub(r"[^a-z0-9]+", " ", name.lower()).split()
+        if len(t) >= 3 and t not in _NAME_STOPWORDS
+    }
+
+
+def _names_likely_match(query: str, entity_name: str) -> bool:
+    qa = _name_tokens(query)
+    eb = _name_tokens(entity_name)
+    if not qa or not eb:
+        return False
+    return bool(qa & eb)
+
+
+def _diffbot_entity_trusted(
+    resp: DiffbotEnhanceResponse,
+    *,
+    company_name: str,
+    domain_hint: str | None,
+    score_threshold: float,
+) -> bool:
+    """Gate Diffbot→card promotion so a wrong KG match (e.g. Miror vs Mirador)
+    never overwrites a good Parallel/Exa synthesis."""
+    if not resp.succeeded or not resp.entity:
+        return False
+    e = resp.entity
+    hint = _normalize_domain(domain_hint)
+    homepage = _normalize_domain(e.get("homepageUri"))
+    if hint and homepage:
+        if hint == homepage or hint in homepage or homepage in hint:
+            return True
+        hint_root = hint.split(".")[0]
+        home_root = homepage.split(".")[0]
+        if len(hint_root) >= 4 and hint_root == home_root:
+            return True
+    db_name = str(e.get("name") or e.get("fullName") or "")
+    if _names_likely_match(company_name, db_name):
+        return resp.score >= score_threshold
+    return resp.score >= max(score_threshold, 0.92)
+
+
+def _ensure_block(tool_input: dict[str, Any], key: str) -> dict[str, Any]:
+    block = tool_input.get(key)
+    if not isinstance(block, dict):
+        block = {}
+        tool_input[key] = block
+    return block
+
+
+def _plain_missing(v: Any) -> bool:
+    if v is None or v == "" or v == "unknown":
+        return True
+    if isinstance(v, list) and len(v) == 0:
+        return True
+    return False
+
+
+def _valued_missing(v: Any) -> bool:
+    if not isinstance(v, dict):
+        return True
+    val = v.get("value")
+    conf = v.get("confidence")
+    if val in (None, "", [], {}):
+        return True
+    if conf in (None, "unknown"):
+        return True
+    return False
+
+
+def _confirmed_valued(
+    value: Any,
+    basis: str,
+    source_ids: list[int] | None = None,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "value": value,
+        "confidence": "confirmed",
+        "basis": basis,
+    }
+    if source_ids:
+        out["sources"] = source_ids
+    return out
+
+
+def _parse_founded_year(v: Any) -> int | None:
+    s = _fmt_field_str(v)
+    if not s:
+        return None
+    if s.startswith("d"):
+        s = s[1:]
+    m = re.match(r"(\d{4})", s)
+    return int(m.group(1)) if m else None
+
+
+def _parse_founded_date(v: Any) -> str | None:
+    s = _fmt_field_str(v)
+    if not s:
+        return None
+    if s.startswith("d"):
+        s = s[1:]
+    m = re.match(r"(\d{4}-\d{2}-\d{2})", s)
+    return m.group(1) if m else None
+
+
+def _diffbot_source_ids(
+    tool_input: dict[str, Any],
+    entity: dict[str, Any],
+) -> list[int]:
+    url_map = _url_to_source_id_map(tool_input)
+    ids: list[int] = []
+    for u in _diffbot_origin_urls(entity):
+        norm = u.strip().lower().rstrip("/")
+        sid = url_map.get(norm)
+        if sid is not None and sid not in ids:
+            ids.append(sid)
+    return ids[:4]
+
+
+def _promote_diffbot_fields_into_card(
+    tool_input: dict[str, Any],
+    diffbot_resp: DiffbotEnhanceResponse,
+    *,
+    company_name: str,
+    domain_hint: str | None,
+    score_threshold: float,
+) -> tuple[dict[str, Any], int]:
+    if not _diffbot_entity_trusted(
+        diffbot_resp,
+        company_name=company_name,
+        domain_hint=domain_hint,
+        score_threshold=score_threshold,
+    ):
+        return tool_input, 0
+
+    e = diffbot_resp.entity or {}
+    promoted = 0
+    src_ids = _diffbot_source_ids(tool_input, e)
+    basis = f"Diffbot Knowledge Graph (match score {diffbot_resp.score:.2f})."
+
+    identity = _ensure_block(tool_input, "company_identity")
+    if _plain_missing(identity.get("description")):
+        desc = e.get("description")
+        if isinstance(desc, str) and desc.strip():
+            identity["description"] = desc.strip()
+            promoted += 1
+    if _plain_missing(identity.get("headquarters")):
+        hq = _fmt_address(e.get("address"))
+        if not hq and isinstance(e.get("location"), dict):
+            hq = e["location"].get("address")
+        if hq:
+            identity["headquarters"] = hq
+            promoted += 1
+    if _plain_missing(identity.get("founded_year")):
+        yr = _parse_founded_year(e.get("foundingDate"))
+        if yr:
+            identity["founded_year"] = yr
+            promoted += 1
+    if _plain_missing(identity.get("founded_date")):
+        fd = _parse_founded_date(e.get("foundingDate"))
+        if fd:
+            identity["founded_date"] = fd
+            promoted += 1
+    homepage = e.get("homepageUri")
+    if isinstance(homepage, str) and homepage.strip():
+        dom = _normalize_domain(homepage)
+        if _plain_missing(identity.get("website")):
+            identity["website"] = (
+                homepage if homepage.startswith("http") else f"https://{homepage}"
+            )
+            promoted += 1
+        if dom and _plain_missing(identity.get("domain")):
+            identity["domain"] = dom
+            promoted += 1
+    if _plain_missing(identity.get("company_linkedin")):
+        li = e.get("linkedInUri")
+        if isinstance(li, str) and li.strip():
+            identity["company_linkedin"] = li.strip()
+            promoted += 1
+    if identity.get("status") in (None, "", "unknown"):
+        if e.get("isPublic") is True:
+            identity["status"] = "public"
+            promoted += 1
+        elif e.get("isPublic") is False:
+            identity["status"] = "private"
+            promoted += 1
+
+    social = identity.get("social_handles")
+    if not isinstance(social, dict):
+        social = {}
+        identity["social_handles"] = social
+    for key, field in (
+        ("linkedin", "linkedInUri"),
+        ("twitter", "twitterUri"),
+        ("facebook", "facebookUri"),
+        ("instagram", "instagramUri"),
+        ("youtube", "youtubeUri"),
+    ):
+        if _plain_missing(social.get(key)):
+            val = e.get(field)
+            if isinstance(val, str) and val.strip():
+                social[key] = val.strip()
+                promoted += 1
+
+    people = _ensure_block(tool_input, "people_and_decision_map")
+    if not people.get("ceo"):
+        ceo_raw = e.get("ceo")
+        if isinstance(ceo_raw, dict) and ceo_raw.get("name"):
+            people["ceo"] = {
+                "name": ceo_raw["name"],
+                "title": ceo_raw.get("title") or "CEO",
+                "linkedin_url": ceo_raw.get("linkedInUri"),
+                "sources": src_ids,
+            }
+            promoted += 1
+    if not people.get("founders"):
+        founders: list[dict[str, Any]] = []
+        for f in e.get("founders") or []:
+            if isinstance(f, dict) and f.get("name"):
+                founders.append({
+                    "name": f["name"],
+                    "title": f.get("title"),
+                    "linkedin_url": f.get("linkedInUri"),
+                    "is_founder": True,
+                    "sources": src_ids,
+                })
+        if founders:
+            people["founders"] = founders
+            promoted += 1
+    if not people.get("executives"):
+        execs: list[dict[str, Any]] = []
+        for x in e.get("executives") or e.get("boardMembers") or []:
+            if isinstance(x, dict) and x.get("name"):
+                execs.append({
+                    "name": x["name"],
+                    "title": x.get("title"),
+                    "linkedin_url": x.get("linkedInUri"),
+                    "sources": src_ids,
+                })
+        if execs:
+            people["executives"] = execs[:12]
+            promoted += 1
+
+    traction = _ensure_block(tool_input, "traction_and_momentum")
+    if _valued_missing(traction.get("employee_count_estimate")):
+        emp = (
+            _fmt_field_int(e.get("nbEmployees"))
+            or _fmt_field_int(e.get("nbEmployeesMax"))
+            or _fmt_field_int(e.get("nbEmployeesMin"))
+        )
+        if emp:
+            traction["employee_count_estimate"] = _confirmed_valued(
+                emp, basis, src_ids
+            )
+            promoted += 1
+
+    classification = _ensure_block(tool_input, "classification")
+    if _plain_missing(classification.get("industry")):
+        industries = e.get("industries") or []
+        if isinstance(industries, list):
+            for i in industries:
+                name = i.get("name") if isinstance(i, dict) else i
+                if isinstance(name, str) and name.strip():
+                    classification["industry"] = name.strip()
+                    promoted += 1
+                    break
+
+    market = _ensure_block(tool_input, "market_and_competitors")
+    if not market.get("direct_competitors"):
+        comps: list[str] = []
+        for c in e.get("competitors") or []:
+            if isinstance(c, dict) and c.get("name"):
+                comps.append(str(c["name"]))
+            elif isinstance(c, str):
+                comps.append(c)
+        if comps:
+            market["direct_competitors"] = comps[:_DIFFBOT_MAX_COMPETITORS]
+            promoted += 1
+
+    return tool_input, promoted
+
+
+def _promote_parallel_brief_fields_into_card(
+    tool_input: dict[str, Any],
+    parallel_output: dict[str, Any] | None,
+) -> tuple[dict[str, Any], int]:
+    """Fill obvious gaps from Parallel's research brief (same-company stream)."""
+    brief, _ = _unwrap_parallel_output(parallel_output)
+    if not brief:
+        return tool_input, 0
+
+    promoted = 0
+    basis = "Parallel web research brief (deterministic backfill)."
+
+    identity = _ensure_block(tool_input, "company_identity")
+    if _plain_missing(identity.get("description")) and brief.get("summary"):
+        identity["description"] = str(brief["summary"]).strip()
+        promoted += 1
+    for key, src in (
+        ("legal_entity_name", "legal_entity_name"),
+        ("website", "website"),
+        ("domain", "domain"),
+        ("headquarters", "headquarters"),
+    ):
+        if _plain_missing(identity.get(key)) and brief.get(src):
+            identity[key] = brief[src]
+            promoted += 1
+    if _plain_missing(identity.get("founded_year")) and brief.get("founded_year"):
+        identity["founded_year"] = brief["founded_year"]
+        promoted += 1
+
+    classification = _ensure_block(tool_input, "classification")
+    for key in ("industry", "category", "business_type"):
+        if _plain_missing(classification.get(key)) and brief.get(key):
+            classification[key] = brief[key]
+            promoted += 1
+
+    products_block = _ensure_block(tool_input, "products_and_skus")
+    if not products_block.get("products"):
+        raw = brief.get("products") or []
+        products = [
+            {"name": p, "hero": i == 0}
+            for i, p in enumerate(raw)
+            if isinstance(p, str) and p.strip()
+        ]
+        if products:
+            products_block["products"] = products
+            promoted += 1
+    if not products_block.get("product_categories") and brief.get("products"):
+        cats = [p for p in brief.get("products") or [] if isinstance(p, str)]
+        if cats:
+            products_block["product_categories"] = cats[:8]
+            promoted += 1
+
+    market = _ensure_block(tool_input, "market_and_competitors")
+    if not market.get("direct_competitors") and brief.get("competitors"):
+        market["direct_competitors"] = [
+            c for c in brief["competitors"] if isinstance(c, str)
+        ]
+        promoted += 1
+    if _valued_missing(market.get("competitive_advantage")) and brief.get(
+        "competitive_advantage"
+    ):
+        market["competitive_advantage"] = _confirmed_valued(
+            brief["competitive_advantage"], basis
+        )
+        promoted += 1
+
+    biz = _ensure_block(tool_input, "business_model")
+    if _valued_missing(biz.get("business_model_summary")) and brief.get("summary"):
+        biz["business_model_summary"] = _confirmed_valued(brief["summary"], basis)
+        promoted += 1
+
+    people = _ensure_block(tool_input, "people_and_decision_map")
+    if not people.get("ceo") and brief.get("ceo"):
+        people["ceo"] = {"name": str(brief["ceo"]), "title": "CEO"}
+        promoted += 1
+    if not people.get("founders") and brief.get("founders"):
+        people["founders"] = [
+            {"name": n, "is_founder": True}
+            for n in brief["founders"]
+            if isinstance(n, str) and n.strip()
+        ]
+        promoted += 1
+
+    traction = _ensure_block(tool_input, "traction_and_momentum")
+    if _valued_missing(traction.get("employee_count_estimate")):
+        emp = brief.get("employee_count_estimate")
+        if isinstance(emp, int) and emp > 0:
+            traction["employee_count_estimate"] = _confirmed_valued(emp, basis)
+            promoted += 1
+    if _valued_missing(traction.get("hiring_pace")) and brief.get("hiring_pace"):
+        traction["hiring_pace"] = _confirmed_valued(brief["hiring_pace"], basis)
+        promoted += 1
+
+    funding = _ensure_block(tool_input, "funding_and_investors")
+    if _plain_missing(funding.get("last_round_type")) and brief.get("last_round_type"):
+        funding["last_round_type"] = brief["last_round_type"]
+        promoted += 1
+    if _plain_missing(funding.get("last_round_date")) and brief.get("last_round_date"):
+        funding["last_round_date"] = brief["last_round_date"]
+        promoted += 1
+    if not funding.get("known_investors") and brief.get("investors"):
+        funding["known_investors"] = [
+            i for i in brief["investors"] if isinstance(i, str)
+        ]
+        promoted += 1
+
+    return tool_input, promoted
+
+
 def _build_candidate_sources(
     exa_contents: list[ExaContent],
     parallel_output: dict[str, Any] | None,
     parallel_citations: list[dict[str, Any]] | None = None,
-    max_total: int = 12,
+    diffbot_resp: DiffbotEnhanceResponse | None = None,
+    max_total: int = 14,
 ) -> list[SourceSchema]:
-    """Numbered registry of URLs we already fetched / Parallel cited.
+    """Numbered registry of URLs we already fetched / Parallel + Diffbot cited.
 
-    Exa contents come first (we have the full text, freshest evidence), then
-    unique URLs from three Parallel locations (any of which may be empty
-    depending on Parallel's response shape that day):
-      * `parallel_citations` — top-level `result.citations[]`
-      * `parallel_output["basis"][].citations[].url` — per-field provenance
-      * `parallel_output["sources"][].url` — flat sources list if present
+    Order of precedence (richer evidence first):
+      1. Exa contents — we have full text, freshest evidence
+      2. Diffbot origin URLs — KG-vetted first-party provenance per fact
+      3. Parallel top-level `citations[]`
+      4. Parallel `basis[].citations[]` — per-field provenance
+      5. Parallel flat `sources[]` if present
     Dedup by normalized URL. Returns at most `max_total` entries with stable
-    integer ids 1..N.
+    integer ids 1..N. Bumped from 12 to 14 to make room for the Diffbot
+    origins without crowding out Exa/Parallel.
     """
     seen: set[str] = set()
     out: list[SourceSchema] = []
@@ -825,14 +1690,24 @@ def _build_candidate_sources(
         next_id += 1
         return len(out) >= max_total
 
-    # Pass 2: top-level Parallel citations (most reliable shape).
+    # Pass 2: Diffbot origin URLs (KG-vetted first-party provenance). We use
+    # a labelled snippet so Claude can recognize these as Diffbot-attributed
+    # in the registry, which makes them eligible for confidence=confirmed.
+    if diffbot_resp is not None and diffbot_resp.succeeded:
+        diffbot_score = diffbot_resp.score
+        for u in _diffbot_origin_urls(diffbot_resp.entity):
+            label = f"Diffbot origin (match score {diffbot_score:.2f})"
+            if _add(u, None, label):
+                return out
+
+    # Pass 3: top-level Parallel citations (most reliable shape).
     for cit in parallel_citations or []:
         excerpts = cit.get("excerpts") or []
         snippet = excerpts[0] if excerpts else cit.get("snippet")
         if _add(cit.get("url") or "", cit.get("title"), snippet):
             return out
 
-    # Pass 3: Parallel `basis[].citations[]` (per-field provenance — what
+    # Pass 4: Parallel `basis[].citations[]` (per-field provenance — what
     # `pro` processor historically returns).
     for basis_item in (parallel_output or {}).get("basis", []) or []:
         for cit in basis_item.get("citations", []) or []:
@@ -841,8 +1716,9 @@ def _build_candidate_sources(
             if _add(cit.get("url") or "", cit.get("title"), snippet):
                 return out
 
-    # Pass 4: flat `sources[]` if Parallel returned one.
-    for src in (parallel_output or {}).get("sources", []) or []:
+    # Pass 5: flat `sources[]` on the unwrapped Parallel brief.
+    brief, _ = _unwrap_parallel_output(parallel_output)
+    for src in brief.get("sources") or []:
         if isinstance(src, dict):
             if _add(src.get("url") or "", src.get("title"), src.get("snippet")):
                 return out
@@ -864,15 +1740,294 @@ def _candidate_registry_block(candidates: list[SourceSchema]) -> str:
     return "\n".join(lines)
 
 
+def _dedupe_claude_source_ids(
+    tool_input: dict[str, Any],
+) -> tuple[dict[str, Any], dict[int, int]]:
+    """Renumber duplicate source ids and remap signal refs. Returns id_remap."""
+    sac_existing = tool_input.get("sources_and_confidence") or {}
+    raw_existing_sources = sac_existing.get("sources") or []
+    id_remap: dict[int, int] = {}
+    seen_ids: set[int] = set()
+    if not raw_existing_sources:
+        return tool_input, id_remap
+
+    max_seen_id = max(
+        (s.get("id") for s in raw_existing_sources
+         if isinstance(s, dict) and isinstance(s.get("id"), int)),
+        default=0,
+    )
+    next_free = max_seen_id + 1
+    for s in raw_existing_sources:
+        if not isinstance(s, dict):
+            continue
+        sid = s.get("id")
+        if not isinstance(sid, int):
+            continue
+        if sid in seen_ids:
+            s["id"] = next_free
+            id_remap[sid] = next_free
+            seen_ids.add(next_free)
+            next_free += 1
+        else:
+            seen_ids.add(sid)
+
+    if id_remap:
+        for sig in tool_input.get("signals") or []:
+            if not isinstance(sig, dict):
+                continue
+            refs = sig.get("source_refs") or sig.get("sources") or []
+            if isinstance(refs, list):
+                key = "source_refs" if "source_refs" in sig else "sources"
+                sig[key] = [
+                    id_remap.get(r, r) if isinstance(r, int) else r for r in refs
+                ]
+    return tool_input, id_remap
+
+
+def _merge_candidate_sources_into_card(
+    tool_input: dict[str, Any],
+    candidate_sources: list[SourceSchema],
+) -> tuple[dict[str, Any], int]:
+    """Append registry URLs Claude omitted. Returns count appended."""
+    if not candidate_sources:
+        return tool_input, 0
+
+    existing = (
+        (tool_input.get("sources_and_confidence") or {}).get("sources") or []
+    )
+    existing_urls = {
+        (s.get("url") or "").strip().lower().rstrip("/")
+        for s in existing
+        if isinstance(s, dict)
+    }
+    existing_ids = {
+        s.get("id") for s in existing if isinstance(s, dict) and isinstance(s.get("id"), int)
+    }
+    next_id = (max(existing_ids) + 1) if existing_ids else 1
+
+    appended: list[dict[str, Any]] = []
+    for cand in candidate_sources:
+        norm = cand.url.strip().lower().rstrip("/")
+        if norm in existing_urls:
+            continue
+        d = cand.model_dump(mode="json")
+        if cand.id in existing_ids:
+            while next_id in existing_ids:
+                next_id += 1
+            d["id"] = next_id
+            existing_ids.add(next_id)
+            next_id += 1
+        else:
+            existing_ids.add(cand.id)
+            next_id = max(next_id, cand.id + 1)
+        appended.append(d)
+        existing_urls.add(norm)
+
+    if not appended:
+        return tool_input, 0
+
+    merged_sources = list(existing) + appended
+    sac = dict(tool_input.get("sources_and_confidence") or {})
+    sac["sources"] = merged_sources
+    if not sac.get("coverage_summary"):
+        sac["coverage_summary"] = (
+            f"Backfilled {len(appended)} of {len(merged_sources)} "
+            "sources from Exa + Parallel + Diffbot citations."
+        )
+    tool_input["sources_and_confidence"] = sac
+    return tool_input, len(appended)
+
+
+def _url_to_source_id_map(tool_input: dict[str, Any]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for s in (tool_input.get("sources_and_confidence") or {}).get("sources") or []:
+        if not isinstance(s, dict):
+            continue
+        url = s.get("url")
+        sid = s.get("id")
+        if isinstance(url, str) and isinstance(sid, int):
+            norm = url.strip().lower().rstrip("/")
+            out[norm] = sid
+    return out
+
+
+def _map_parallel_signal_type(raw: Any) -> str | None:
+    if not isinstance(raw, str):
+        return None
+    t = raw.lower().strip().replace("-", "_").replace(" ", "_")
+    if t in _VALID_SIGNAL_TYPES:
+        return t
+    return _SIGNAL_TYPE_ALIASES.get(t)
+
+
+def _harvest_parallel_signals_if_thin(
+    tool_input: dict[str, Any],
+    parallel_output: dict[str, Any] | None,
+    *,
+    min_signals: int = _SYNTH_MIN_SIGNALS,
+) -> tuple[dict[str, Any], int]:
+    """Promote Parallel's `signals[]` when Claude under-delivered on first pass."""
+    existing = [s for s in (tool_input.get("signals") or []) if isinstance(s, dict)]
+    if len(existing) >= min_signals:
+        return tool_input, 0
+
+    url_to_id = _url_to_source_id_map(tool_input)
+    harvested: list[dict[str, Any]] = []
+    seen_headlines: set[str] = {
+        (s.get("headline") or "").strip().lower() for s in existing if s.get("headline")
+    }
+
+    brief, _ = _unwrap_parallel_output(parallel_output)
+    for ps in brief.get("signals") or []:
+        if not isinstance(ps, dict):
+            continue
+        headline = (ps.get("headline") or "").strip()
+        if not headline:
+            continue
+        norm_headline = headline.lower()
+        if norm_headline in seen_headlines:
+            continue
+        sig_type = _map_parallel_signal_type(ps.get("type"))
+        if not sig_type:
+            continue
+
+        source_ids: list[int] = []
+        for url in ps.get("source_urls") or []:
+            if not isinstance(url, str):
+                continue
+            norm = url.strip().lower().rstrip("/")
+            if norm in url_to_id:
+                source_ids.append(url_to_id[norm])
+
+        weight = ps.get("weight")
+        if not isinstance(weight, int) or weight < 1 or weight > 10:
+            weight = 5
+
+        harvested.append({
+            "type": sig_type,
+            "headline": headline,
+            "evidence": ps.get("evidence"),
+            "date": ps.get("date"),
+            "weight": weight,
+            "sources": source_ids,
+        })
+        seen_headlines.add(norm_headline)
+        if len(existing) + len(harvested) >= min_signals:
+            break
+
+    if not harvested:
+        return tool_input, 0
+
+    tool_input["signals"] = existing + harvested
+    return tool_input, len(harvested)
+
+
+async def _postprocess_synth_tool_input(
+    run_id: uuid.UUID,
+    tool_input: dict[str, Any],
+    candidate_sources: list[SourceSchema],
+    parallel_output: dict[str, Any] | None,
+    *,
+    diffbot_resp: DiffbotEnhanceResponse | None = None,
+    company_name: str = "",
+    domain_hint: str | None = None,
+    diffbot_score_threshold: float = 0.0,
+) -> dict[str, Any]:
+    """Deterministic first-pass cleanup — no extra LLM cost."""
+    tool_input, id_remap = _dedupe_claude_source_ids(tool_input)
+    if id_remap:
+        await emit(
+            run_id, "sources_deduped",
+            f"Renumbered {len(id_remap)} duplicate source id(s) from Claude.",
+            level="warn",
+            meta={"stage": 3, "remapped_count": len(id_remap)},
+        )
+
+    claude_sources_before = len(
+        (tool_input.get("sources_and_confidence") or {}).get("sources") or []
+    )
+    tool_input, backfilled = _merge_candidate_sources_into_card(
+        tool_input, candidate_sources
+    )
+    if backfilled:
+        await emit(
+            run_id, "sources_backfilled",
+            f"Backfilled {backfilled} source(s) from candidate registry "
+            f"(Claude returned {claude_sources_before}, "
+            f"final total {claude_sources_before + backfilled}).",
+            level="info",
+            meta={
+                "stage": 3,
+                "claude_sources": claude_sources_before,
+                "backfilled": backfilled,
+                "final_total": claude_sources_before + backfilled,
+            },
+        )
+
+    signals_before = len(tool_input.get("signals") or [])
+    tool_input, harvested = _harvest_parallel_signals_if_thin(
+        tool_input, parallel_output
+    )
+    if harvested:
+        await emit(
+            run_id, "signals_harvested",
+            f"Harvested {harvested} signal(s) from Parallel brief "
+            f"(Claude returned {signals_before}, now {signals_before + harvested}).",
+            level="info",
+            meta={
+                "stage": 3,
+                "claude_signals": signals_before,
+                "harvested": harvested,
+                "final_total": signals_before + harvested,
+            },
+        )
+
+    tool_input, parallel_promoted = _promote_parallel_brief_fields_into_card(
+        tool_input, parallel_output
+    )
+    if parallel_promoted:
+        await emit(
+            run_id, "parallel_fields_promoted",
+            f"Backfilled {parallel_promoted} card field(s) from Parallel brief.",
+            level="info",
+            meta={"stage": 3, "promoted": parallel_promoted},
+        )
+
+    if diffbot_resp is not None:
+        tool_input, diffbot_promoted = _promote_diffbot_fields_into_card(
+            tool_input,
+            diffbot_resp,
+            company_name=company_name,
+            domain_hint=domain_hint,
+            score_threshold=diffbot_score_threshold,
+        )
+        if diffbot_promoted:
+            await emit(
+                run_id, "diffbot_fields_promoted",
+                f"Backfilled {diffbot_promoted} card field(s) from Diffbot KG "
+                f"(score={diffbot_resp.score:.2f}).",
+                level="info",
+                meta={
+                    "stage": 3,
+                    "promoted": diffbot_promoted,
+                    "diffbot_score": diffbot_resp.score,
+                },
+            )
+
+    return tool_input
+
+
 async def _stage3_synthesize(
     run_id: uuid.UUID,
     p: ResearchParams,
     article_ctx: _ArticleContext | None,
     parallel_resp: ParallelTaskResponse,
     exa_bundle: _ExaBundle,
+    diffbot_resp: DiffbotEnhanceResponse,
     factory: async_sessionmaker[AsyncSession],
+    cfg: "ResearchConfig",
 ) -> tuple[dict[str, Any], float]:
-    """Send Claude both evidence streams + the contract schema as a tool spec.
+    """Send Claude all three evidence streams + the contract schema as a tool spec.
     Returns (card_dict, cost_usd)."""
 
     contract_schema = get_contract_schema()
@@ -912,22 +2067,35 @@ async def _stage3_synthesize(
         exa_bundle.contents,
         parallel_resp.output_json,
         parallel_citations=parallel_resp.citations,
+        diffbot_resp=diffbot_resp,
     )
     candidate_block = _candidate_registry_block(candidate_sources)
+
+    diffbot_evidence = _render_diffbot_evidence(diffbot_resp)
 
     user_msg = (
         f"TARGET COMPANY: {p.company_name}\n"
         f"DOMAIN HINT: {p.domain_hint or '(none)'}\n\n"
         f"{article_block}"
         f"CANDIDATE SOURCE REGISTRY ({len(candidate_sources)} verified URLs — "
-        "fetched by Exa or cited by Parallel — cite by id, don't invent):\n"
+        "fetched by Exa, cited by Parallel, or attached as Diffbot origins — "
+        "cite by id, don't invent):\n"
         f"{candidate_block}\n\n"
         f"PARALLEL OUTPUT (pre-structured JSON):\n```json\n{parallel_json}\n```\n\n"
         f"EXA SNIPPETS ({len(exa_bundle.contents)} pages):\n{exa_block}\n\n"
+        f"DIFFBOT KG EVIDENCE:\n{diffbot_evidence}\n\n"
+        "PRE-FLIGHT (mandatory before calling the tool):\n"
+        f"- `signals`: at least {_SYNTH_MIN_SIGNALS} entries. Parallel's `signals[]` "
+        "block is pre-vetted — translate each into the card signal schema.\n"
+        f"- `sources_and_confidence.sources`: at least {_SYNTH_MIN_SOURCES} entries "
+        "from the CANDIDATE SOURCE REGISTRY above (preserve the exact ids shown).\n\n"
         "Produce the final CompanyCardV1 via the synthesize_company_card tool. "
         "Your `sources_and_confidence.sources` array MUST include the registry "
         "entries (preserving their ids) plus any extra Parallel-cited URLs you "
-        "want to attribute."
+        "want to attribute. When citing a Diffbot-attributed fact, point the "
+        "Valued field's `sources` at the corresponding Diffbot-origin id from "
+        "the registry — those origins are first-party and eligible for "
+        "`confidence=\"confirmed\"`."
     )
 
     client = get_claude_client()
@@ -955,19 +2123,33 @@ async def _stage3_synthesize(
 
     total_cost = resp.cost_usd
 
-    # ── Retry-on-thin: if Claude returned <3 signals or <3 sources, nudge once.
+    # ── Deterministic post-process (free — fixes the common failure mode where
+    # Claude fills identity blocks but omits sources[] / under-populates
+    # signals[] even though Parallel + the registry already have them).
+    tool_input = await _postprocess_synth_tool_input(
+        run_id,
+        tool_input,
+        candidate_sources,
+        parallel_resp.output_json,
+        diffbot_resp=diffbot_resp,
+        company_name=p.company_name,
+        domain_hint=p.domain_hint,
+        diffbot_score_threshold=cfg.diffbot.score_threshold,
+    )
+
     signals = tool_input.get("signals") or []
     sources = (
         (tool_input.get("sources_and_confidence") or {}).get("sources") or []
     )
-    if (
-        len(signals) < _SYNTH_MIN_SIGNALS
-        or len(sources) < _SYNTH_MIN_SOURCES
-    ):
+
+    # ── Retry-on-thin (worst case only): signals still below floor after
+    # harvest. Never burn a second LLM pass for missing sources — the
+    # registry backfill above handles that deterministically.
+    if len(signals) < _SYNTH_MIN_SIGNALS:
         await emit(
             run_id, "synthesis_retry",
-            f"Synth returned thin output (signals={len(signals)}, "
-            f"sources={len(sources)}); requesting expansion.",
+            f"Synth returned thin signals ({len(signals)}<{_SYNTH_MIN_SIGNALS}) "
+            "after registry backfill + Parallel harvest; requesting expansion.",
             level="warn",
             meta={
                 "stage": 3,
@@ -975,12 +2157,9 @@ async def _stage3_synthesize(
                 "sources_returned": len(sources),
                 "min_signals": _SYNTH_MIN_SIGNALS,
                 "min_sources": _SYNTH_MIN_SOURCES,
+                "reason": "signals_below_floor",
             },
         )
-        # True assistant replay: include the actual previous tool payload so
-        # Claude can diff against itself and expand. Cap the replay JSON to
-        # keep us under context — the model needs the structure, not every
-        # nested character.
         prev_payload_json = json.dumps(tool_input, ensure_ascii=False)[:60000]
         retry_messages = [
             ClaudeMessage(role="user", content=user_msg),
@@ -995,19 +2174,15 @@ async def _stage3_synthesize(
             ClaudeMessage(
                 role="user",
                 content=(
-                    f"That call returned only {len(signals)} signals and "
-                    f"{len(sources)} sources, which is below the contract "
-                    f"minimum of {_SYNTH_MIN_SIGNALS} signals and "
-                    f"{_SYNTH_MIN_SOURCES} sources. Re-emit the FULL card via "
-                    "the synthesize_company_card tool, keeping the good "
-                    "fields you already produced and EXPANDING signals to at "
-                    f"least {_SYNTH_MIN_SIGNALS} (derive them from product "
-                    "launches, founder background, hiring activity, niche "
-                    "positioning, customer reviews, partnerships, or category "
-                    f"trends — see the system rules) and sources to at least "
-                    f"{_SYNTH_MIN_SOURCES} from the Exa snippets you were "
-                    "given. Don't invent facts — but DO surface the signals "
-                    "and sources that are clearly present in the evidence."
+                    f"That call returned only {len(signals)} signals, below the "
+                    f"contract minimum of {_SYNTH_MIN_SIGNALS}. Sources are already "
+                    f"covered ({len(sources)} in the card). Re-emit the FULL card "
+                    "via the synthesize_company_card tool, keeping every good field "
+                    f"you already produced and EXPANDING `signals` to at least "
+                    f"{_SYNTH_MIN_SIGNALS}. Derive them from Parallel's signals[] "
+                    "block, Exa snippets, and Diffbot KG evidence — see system "
+                    "rules for valid types. Don't invent facts — surface what's "
+                    "clearly present in the evidence."
                 ),
             ),
         ]
@@ -1030,24 +2205,25 @@ async def _stage3_synthesize(
             total_cost += resp2.cost_usd
             ti2 = resp2.first_tool_input
             if isinstance(ti2, dict):
+                ti2 = await _postprocess_synth_tool_input(
+                    run_id,
+                    ti2,
+                    candidate_sources,
+                    parallel_resp.output_json,
+                    diffbot_resp=diffbot_resp,
+                    company_name=p.company_name,
+                    domain_hint=p.domain_hint,
+                    diffbot_score_threshold=cfg.diffbot.score_threshold,
+                )
                 new_signals = ti2.get("signals") or []
-                new_sources = (
-                    (ti2.get("sources_and_confidence") or {}).get("sources") or []
-                )
-                # Accept retry only if STRICTLY better: no dimension regresses
-                # AND at least one dimension improves. Equal-quality retries
-                # are rejected to avoid burning a $0.40 second pass for nothing.
-                no_regression = (
-                    len(new_signals) >= len(signals)
-                    and len(new_sources) >= len(sources)
-                )
-                strictly_better = (
-                    len(new_signals) > len(signals)
-                    or len(new_sources) > len(sources)
-                )
-                if no_regression and strictly_better:
+                # Accept retry only if strictly more signals (sources already
+                # handled deterministically — don't regress signal count).
+                if len(new_signals) > len(signals):
                     tool_input = ti2
-                    signals, sources = new_signals, new_sources
+                    signals = new_signals
+        sources = (
+            (tool_input.get("sources_and_confidence") or {}).get("sources") or []
+        )
         await emit(
             run_id, "synthesis_retry_done",
             f"Retry produced signals={len(signals)}, sources={len(sources)}.",
@@ -1057,122 +2233,6 @@ async def _stage3_synthesize(
                 "sources_final": len(sources),
             },
         )
-
-    # ── Defensive: dedupe Claude-emitted source ids ─────────────────────────
-    # Claude usually emits unique ids in its tool_use output, but tool_use is
-    # best-effort. If it ever returns two sources with the same id, renumber
-    # the duplicates AND remap signals[].source_refs accordingly so the card
-    # validates and signal footnotes still point somewhere real.
-    sac_existing = tool_input.get("sources_and_confidence") or {}
-    raw_existing_sources = sac_existing.get("sources") or []
-    id_remap: dict[int, int] = {}
-    seen_ids: set[int] = set()
-    if raw_existing_sources:
-        max_seen_id = max(
-            (s.get("id") for s in raw_existing_sources
-             if isinstance(s, dict) and isinstance(s.get("id"), int)),
-            default=0,
-        )
-        next_free = max_seen_id + 1
-        for s in raw_existing_sources:
-            if not isinstance(s, dict):
-                continue
-            sid = s.get("id")
-            if not isinstance(sid, int):
-                continue
-            if sid in seen_ids:
-                s["id"] = next_free
-                id_remap[sid] = next_free  # last-wins remap for signal refs
-                seen_ids.add(next_free)
-                next_free += 1
-            else:
-                seen_ids.add(sid)
-        # Best-effort: remap signal source_refs (the most common cite site).
-        # We can't safely remap Valued.sources nested in arbitrary blocks
-        # because the same id-collision is genuinely ambiguous — but signals
-        # is shallow enough to fix cleanly.
-        if id_remap:
-            for sig in tool_input.get("signals") or []:
-                if not isinstance(sig, dict):
-                    continue
-                refs = sig.get("source_refs") or sig.get("sources") or []
-                if isinstance(refs, list):
-                    key = "source_refs" if "source_refs" in sig else "sources"
-                    sig[key] = [id_remap.get(r, r) if isinstance(r, int) else r for r in refs]
-            await emit(
-                run_id, "sources_deduped",
-                f"Renumbered {len(id_remap)} duplicate source id(s) from Claude.",
-                level="warn",
-                meta={"stage": 3, "remapped_count": len(id_remap)},
-            )
-
-    # ── Deterministic source backfill ───────────────────────────────────────
-    # If Claude still left sources empty/short after the retry, merge in our
-    # candidate registry so the card has real, citable URLs. This is safe:
-    # registry URLs were either fetched by Exa or cited by Parallel — none are
-    # hallucinated. Existing Claude-emitted sources keep their ids; we append
-    # only the registry URLs Claude didn't already include.
-    if candidate_sources:
-        existing = (
-            (tool_input.get("sources_and_confidence") or {}).get("sources") or []
-        )
-        existing_urls = {
-            (s.get("url") or "").strip().lower().rstrip("/")
-            for s in existing
-            if isinstance(s, dict)
-        }
-        existing_ids = {
-            s.get("id") for s in existing if isinstance(s, dict) and isinstance(s.get("id"), int)
-        }
-        next_id = (max(existing_ids) + 1) if existing_ids else 1
-
-        appended: list[dict[str, Any]] = []
-        for cand in candidate_sources:
-            norm = cand.url.strip().lower().rstrip("/")
-            if norm in existing_urls:
-                continue
-            d = cand.model_dump(mode="json")
-            # Preserve the registry id we showed Claude when it's free, so any
-            # `Valued.sources` / `Signal.source_refs` Claude wrote against the
-            # registry still align. Only renumber on collision with Claude's
-            # own ids (which take precedence — Claude chose them first).
-            if cand.id in existing_ids:
-                # Skip any pre-reserved ids, then claim the next free one.
-                while next_id in existing_ids:
-                    next_id += 1
-                d["id"] = next_id
-                existing_ids.add(next_id)
-                next_id += 1
-            else:
-                existing_ids.add(cand.id)
-                next_id = max(next_id, cand.id + 1)
-            appended.append(d)
-            existing_urls.add(norm)
-
-        if appended:
-            merged_sources = list(existing) + appended
-            sac = dict(tool_input.get("sources_and_confidence") or {})
-            sac["sources"] = merged_sources
-            # If Claude left coverage_summary blank, give it a sane default.
-            if not sac.get("coverage_summary"):
-                sac["coverage_summary"] = (
-                    f"Backfilled {len(appended)} of {len(merged_sources)} "
-                    "sources from Exa + Parallel citations."
-                )
-            tool_input["sources_and_confidence"] = sac
-
-            await emit(
-                run_id, "sources_backfilled",
-                f"Backfilled {len(appended)} source(s) from candidate registry "
-                f"(Claude returned {len(existing)}, final total {len(merged_sources)}).",
-                level="info",
-                meta={
-                    "stage": 3,
-                    "claude_sources": len(existing),
-                    "backfilled": len(appended),
-                    "final_total": len(merged_sources),
-                },
-            )
 
     return tool_input, total_cost
 

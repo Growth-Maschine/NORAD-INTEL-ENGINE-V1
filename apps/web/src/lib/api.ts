@@ -308,6 +308,181 @@ export const listCompanies = (limit = 50) =>
 export const getCompany = (id: string) =>
   api<CompanyDetail>(`/api/research/companies/${id}`);
 
+// ── Company evidence (raw engine I/O) ────────────────────────────────────────
+
+export interface DiffbotPerson {
+  name: string;
+  title?: string;
+  role?: string;
+  summary?: string;
+  linkedInUri?: string;
+  twitterUri?: string;
+  email?: string;
+}
+
+export interface DiffbotEvidence {
+  status: string;
+  score: number;
+  hits: number;
+  latency_ms: number;
+  identity: {
+    name?: string | null;
+    aka?: string | null;
+    description?: string | null;
+    homepage?: string | null;
+    hq?: string | null;
+    founded?: string | null;
+    is_public?: boolean | null;
+    stock?: string | null;
+  };
+  people: {
+    ceo?: DiffbotPerson | null;
+    founders: DiffbotPerson[];
+    executives: DiffbotPerson[];
+  };
+  traction: { employees?: string | number | null };
+  finance: {
+    investments: Array<{
+      date?: string | null;
+      amount_usd?: string | number | null;
+      series?: string | null;
+      investors?: string[];
+    }>;
+    investment_count: number;
+  };
+  market: {
+    industries: string[];
+    categories: string[];
+    competitors: string[];
+  };
+  links: Array<{ label: string; url: string }>;
+  origins: string[];
+  field_count: number;
+}
+
+export interface ParallelSignal {
+  type?: string;
+  date?: string | null;
+  headline?: string;
+  evidence?: string | null;
+  weight?: number | null;
+  source_urls?: string[];
+}
+
+export interface ParallelSource {
+  url: string;
+  title?: string | null;
+  date_published?: string | null;
+  trust_tier?: string | null;
+}
+
+export interface ParallelBrief {
+  company_name?: string;
+  legal_entity_name?: string | null;
+  domain?: string | null;
+  website?: string | null;
+  headquarters?: string | null;
+  founded_year?: number | null;
+  founders?: string[];
+  ceo?: string | null;
+  status?: string | null;
+  industry?: string | null;
+  category?: string | null;
+  business_type?: string | null;
+  summary?: string;
+  products?: string[];
+  revenue_estimate_usd?: string | null;
+  employee_count_estimate?: number | null;
+  hiring_pace?: string | null;
+  total_funding_usd?: number | null;
+  last_round_type?: string | null;
+  last_round_date?: string | null;
+  last_round_amount_usd?: number | null;
+  investors?: string[];
+  competitors?: string[];
+  competitive_advantage?: string | null;
+  signals?: ParallelSignal[];
+  sources?: ParallelSource[];
+  notes_for_synthesizer?: string | null;
+  [key: string]: unknown;
+}
+
+export interface ParallelBasisCitation {
+  url?: string;
+  title?: string | null;
+  excerpts?: string[];
+}
+
+export interface ParallelBasisField {
+  field?: string;
+  citations?: ParallelBasisCitation[];
+  reasoning?: string | null;
+  confidence?: string | null;
+}
+
+export interface ParallelEvidence {
+  status: string;
+  processor?: string | null;
+  latency_ms: number;
+  cost_usd: number;
+  brief: ParallelBrief;
+  basis?: ParallelBasisField[];
+  citations: unknown[];
+  signal_count: number;
+  source_count: number;
+  basis_field_count?: number;
+}
+
+export interface ExaSearchRow {
+  query?: string;
+  search_type?: string;
+  deep_model?: string;
+  num_results?: number;
+  urls: string[];
+  count: number;
+  latency_ms: number;
+}
+
+export interface ExaPageRow {
+  url: string;
+  title?: string | null;
+  chars?: number;
+  text_preview?: string | null;
+  published_date?: string | null;
+  snippet_source?: string;
+}
+
+export interface ExaEvidence {
+  search_count: number;
+  page_count: number;
+  searches: ExaSearchRow[];
+  pages: ExaPageRow[];
+}
+
+export interface CompanyEvidenceSummary {
+  has_evidence: boolean;
+  engine_count: number;
+  total_cost_usd: number;
+  diffbot_score?: number | null;
+  parallel_signals: number;
+  exa_pages: number;
+  diffbot_fields?: number | null;
+}
+
+export interface CompanyEvidence {
+  company_id: string;
+  run_id: string | null;
+  card_id: string | null;
+  collected_at: string | null;
+  diffbot: DiffbotEvidence | null;
+  parallel: ParallelEvidence | null;
+  exa: ExaEvidence;
+  summary: CompanyEvidenceSummary;
+}
+
+export const getCompanyEvidence = (id: string) =>
+  api<CompanyEvidence>(`/api/research/companies/${id}/evidence`);
+
 /** Past research runs for a company — newest first. Used to render the
  *  "Profile history" timeline on the company page. */
 export const listCompanyResearchRuns = (companyId: string, limit = 20) =>
@@ -343,9 +518,14 @@ export interface ExaConfig {
   deep_model: string;
   num_results: number;
 }
+export interface DiffbotConfig {
+  enabled: boolean;
+  score_threshold: number;
+}
 export interface ResearchConfig {
   parallel: ParallelConfig;
   exa: ExaConfig;
+  diffbot: DiffbotConfig;
 }
 export interface ResearchConfigOptions {
   parallel_processors: string[];
@@ -355,6 +535,7 @@ export interface ResearchConfigOptions {
 export type ResearchConfigPatch = {
   parallel?: Partial<ParallelConfig>;
   exa?: Partial<ExaConfig>;
+  diffbot?: Partial<DiffbotConfig>;
 };
 
 export const getResearchConfig = () =>

@@ -15,8 +15,16 @@ Schema (the JSON shape stored under `app_kv.value`):
         "search_type": "deep" | "auto" | "fast" | "neural" | "keyword",
         "deep_model":  "deep-reasoning" | "deep" | "deep-lite",
         "num_results": 10
+      },
+      "diffbot": {
+        "enabled": true,
+        "score_threshold": 0.0
       }
     }
+
+Backward compat: older rows that predate `diffbot` still validate — Pydantic
+fills in the default block, so the API always returns a fully-populated
+ResearchConfig regardless of what's persisted.
 """
 from __future__ import annotations
 
@@ -50,9 +58,26 @@ class ExaConfig(BaseModel):
     num_results: int = Field(default=10, ge=1, le=50)
 
 
+class DiffbotConfig(BaseModel):
+    """Diffbot Knowledge Graph (Enhance) toggles.
+
+    `enabled` is the master kill-switch — when False, Stage 2 must skip the
+    Diffbot call entirely (wiring lands in Step 3 of the plan).
+
+    `score_threshold` is the per-call match-confidence cutoff in [0.0, 1.0].
+    Default `0.0` = no gating: every hit is forwarded to the synthesizer with
+    its score attached, matching the "let Claude weigh it" decision in PLAN.md.
+    Raising it lets the operator suppress weak matches without code changes.
+    """
+
+    enabled: bool = True
+    score_threshold: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
 class ResearchConfig(BaseModel):
     parallel: ParallelConfig = Field(default_factory=ParallelConfig)
     exa: ExaConfig = Field(default_factory=ExaConfig)
+    diffbot: DiffbotConfig = Field(default_factory=DiffbotConfig)
 
 
 _DEFAULTS = ResearchConfig()

@@ -11,7 +11,9 @@ export function Toaster() {
       richColors
       closeButton
       expand
-      gap={12}
+      gap={14}
+      offset={{ bottom: "1.25rem", right: "1.25rem" }}
+      visibleToasts={4}
       toastOptions={{
         classNames: {
           toast:

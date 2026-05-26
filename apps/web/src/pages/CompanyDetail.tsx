@@ -24,6 +24,8 @@ import { Link, useParams } from "react-router-dom";
 
 import { Topbar } from "@/components/layout/Topbar";
 import { MustHaveCoverage } from "@/components/MustHaveCoverage";
+import { CompanyBriefSections } from "@/components/company/CompanyBriefSections";
+import { ResearchEvidence } from "@/components/company/ResearchEvidence";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ConfirmDialog } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -101,6 +103,9 @@ function CompanyCardView({ data }: { data: CompanyDetail }) {
   const traction = c.traction_and_momentum ?? {};
   const market = c.market_and_competitors ?? {};
   const people = c.people_and_decision_map ?? {};
+
+  const description: string | undefined =
+    typeof identity.description === "string" ? identity.description : undefined;
 
   const fitSummary: string | undefined = fit.fit_summary?.value;
   const recAction: string | undefined = fit.recommended_next_action?.value;
@@ -390,6 +395,19 @@ function CompanyCardView({ data }: { data: CompanyDetail }) {
               </Card>
             )}
 
+            {description && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>About</CardTitle>
+                </CardHeader>
+                <CardBody>
+                  <p className="text-sm leading-relaxed text-muted">{description}</p>
+                </CardBody>
+              </Card>
+            )}
+
+            <CompanyBriefSections card={c} />
+
             {/* Signals */}
             <div>
               <div className="mb-3 flex items-baseline justify-between">
@@ -598,6 +616,13 @@ function CompanyCardView({ data }: { data: CompanyDetail }) {
 
             <ProfileHistory companyId={company.id} />
           </aside>
+
+          {/* Research Evidence — full-width raw engine data (Diffbot / Parallel / Exa)
+              sits above the completeness audit so analysts see everything we
+              fetched, not just what synthesis kept in the brief. */}
+          <div className="col-span-12">
+            <ResearchEvidence companyId={company.id} cardSources={sources} />
+          </div>
 
           {/* Profile Completeness — full-width audit of the must-have NORAD
               parameters. Sits at the bottom of the page (below profile

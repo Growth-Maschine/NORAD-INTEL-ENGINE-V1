@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.db import get_session
 from app.models import Card, Company, Run, Signal, Source, TrendArticle
+from app.services.company_evidence import get_company_evidence
 from app.services.research import ResearchParams, execute_research
 
 logger = logging.getLogger(__name__)
@@ -492,6 +493,25 @@ async def list_company_research_runs(
         )
     ).scalars().all()
     return [_run_to_status(r) for r in rows]
+
+
+# ── GET /companies/:id/evidence ──────────────────────────────────────────────
+
+
+@router.get("/companies/{company_id}/evidence")
+async def get_company_evidence_endpoint(
+    company_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Raw research evidence from engine_calls for the canonical card's run.
+
+    Returns normalized Diffbot KG, Parallel brief, and Exa reads — everything
+    we fetched before synthesis, independent of what Claude kept in the card.
+    """
+    result = await get_company_evidence(session, company_id)
+    if result is None:
+        raise HTTPException(404, "company not found")
+    return result
 
 
 # ── GET /companies/:id ───────────────────────────────────────────────────────

@@ -61,10 +61,17 @@ class ExaPatch(BaseModel):
     num_results: int | None = Field(default=None, ge=1, le=50)
 
 
+class DiffbotPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool | None = None
+    score_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
 class ResearchConfigPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     parallel: ParallelPatch | None = None
     exa: ExaPatch | None = None
+    diffbot: DiffbotPatch | None = None
 
 
 class ResearchOptionsOut(BaseModel):
