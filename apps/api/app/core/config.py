@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     # ── research engines + LLM
     parallel_api_key: str = Field(default="")
     exa_api_key: str = Field(default="")
+    diffbot_api_key: str = Field(default="")
     anthropic_api_key: str = Field(default="")
 
     # ── supabase

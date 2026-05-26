@@ -1,0 +1,52 @@
+---
+description: NORAD project conventions — engine pattern, DB workflow, schema rules.
+alwaysApply: true
+---
+
+# NORAD — Project Conventions
+
+Brand intelligence + BD deal-sourcing engine. Monorepo:
+`apps/api` (FastAPI + Python 3.11) and `apps/web` (Vite + React + TS).
+
+Read first if unsure: `docs/backend-pipeline.md` is the canonical pipeline guide.
+
+## Engine clients (`apps/api/app/engines/`)
+
+New external vendor = new client. Every client follows this shape:
+
+- `httpx` for REST APIs (we don't trust SDK minors); `asyncio.to_thread` if the SDK is sync-only.
+- Public methods return a `@dataclass(slots=True)` response with `status`, `latency_ms`, `error`, `cost_usd`, plus per-vendor fields. **Never raise** — fold every failure into `status='error'|'timeout'` so the orchestrator keeps moving.
+- Provide `smoke_check()` returning `{ok, latency_ms, vendor, ...}`.
+- Lazy singleton via `get_X_client()` using `get_settings()`.
+- Mirror `parallel_client.py` / `exa_client.py` / `diffbot_client.py` exactly.
+
+## Cost + I/O audit (`engine_calls` table)
+
+Every vendor call writes one row via `log_X_call(...)`. Full request + response JSONB (100KB truncated). No exceptions — if it hits the network, it gets logged.
+
+## DB schema workflow — no Alembic
+
+Models in `apps/api/app/models/` are the source of truth.
+DDL is applied **directly to Supabase** via versioned files in `apps/api/sql/NNNN_<name>.sql`:
+
+```bash
+psql "$SUPABASE_DATABASE_URL_pool" -f apps/api/sql/0001_*.sql
+```
+
+When a model gains a check constraint or column, write the matching SQL file and apply it in the same commit.
+
+## CompanyCardV1 schema rules (`apps/api/app/schemas/`)
+
+- `Valued[T]` wrapper (`value + confidence + basis + source_refs`) is the contract — don't strip it from new blocks.
+- **Two confidence enums:** per-field is `confirmed | estimated | inferred | unknown`; overall is `high | medium | low | unknown`. They are NOT interchangeable.
+- Parallel's JSON Schema is a strict subset — no `minItems`, `maxItems`, `uniqueItems`, `pattern`, etc. Enforce array minimums via `description` + downstream Python retry.
+
+## Pipeline orchestration
+
+- Stage 2 engines fan out with `asyncio.gather`; one engine failing never kills a run.
+- Settings persisted in `app_kv` table; UI exposes them under `/settings`.
+- `emit()` in `services/run_events.py` tees every state change to BOTH `run_events` (DB) AND `apps/api/logs/pipeline.jsonl`. SSE feed reads `run_events`.
+
+## Secrets
+
+`.env` is gitignored. Never log a token. Strip `token`/`api_key` params before snapshotting requests into `engine_calls`.

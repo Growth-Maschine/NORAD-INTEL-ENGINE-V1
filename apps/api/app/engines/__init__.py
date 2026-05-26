@@ -1,10 +1,11 @@
 """External engine clients — thin SDK wrappers with retry + cost logging.
 
-Three pipes used by the NORAD pipeline:
+Four pipes used by the NORAD pipeline:
 
 - `exa_client`      — Exa (search + /contents) — drives discovery + deep read
 - `claude_client`   — Anthropic Claude (Haiku for rank, Sonnet for synth)
 - `parallel_client` — Parallel Web (agentic research task with output schema)
+- `diffbot_client`  — Diffbot Knowledge Graph (Enhance for pre-structured org facts)
 
 Each client is a lazy singleton (instantiated on first call). Each logs every
 API call to the `engine_calls` table for cost + latency visibility.
@@ -15,13 +16,23 @@ from app.engines.claude_client import (
     ClaudeResponse,
     get_claude_client,
 )
+from app.engines.diffbot_client import (
+    DiffbotClient,
+    DiffbotEnhanceResponse,
+    get_diffbot_client,
+)
 from app.engines.exa_client import (
     ExaClient,
     ExaContent,
     ExaSearchResult,
     get_exa_client,
 )
-from app.engines.logging import log_claude_call, log_exa_call, log_parallel_call
+from app.engines.logging import (
+    log_claude_call,
+    log_diffbot_call,
+    log_exa_call,
+    log_parallel_call,
+)
 from app.engines.parallel_client import (
     ParallelClient,
     ParallelTaskResponse,
@@ -32,15 +43,19 @@ __all__ = [
     "ClaudeClient",
     "ClaudeMessage",
     "ClaudeResponse",
+    "DiffbotClient",
+    "DiffbotEnhanceResponse",
     "ExaClient",
     "ExaContent",
     "ExaSearchResult",
     "ParallelClient",
     "ParallelTaskResponse",
     "get_claude_client",
+    "get_diffbot_client",
     "get_exa_client",
     "get_parallel_client",
     "log_claude_call",
+    "log_diffbot_call",
     "log_exa_call",
     "log_parallel_call",
 ]

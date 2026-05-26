@@ -22,6 +22,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.engines.claude_client import ClaudeResponse
+from app.engines.diffbot_client import DiffbotEnhanceResponse
 from app.engines.exa_client import ExaCallStats, ExaContent
 from app.engines.parallel_client import ParallelTaskResponse
 from app.models.engine_call import EngineCall
@@ -108,6 +109,52 @@ async def log_claude_call(
         status=resp.status,
         error=resp.error,
         meta=meta or {},
+        request_payload=_truncate_payload(req),
+        response_payload=_truncate_payload(rsp),
+    )
+    session.add(row)
+    if commit:
+        await session.commit()
+    return row
+
+
+async def log_diffbot_call(
+    session: AsyncSession,
+    resp: DiffbotEnhanceResponse,
+    *,
+    operation: str = "enhance",
+    run_id: uuid.UUID | None = None,
+    meta: dict[str, Any] | None = None,
+    request_payload: dict[str, Any] | None = None,
+    response_payload: dict[str, Any] | None = None,
+    commit: bool = True,
+) -> EngineCall:
+    """Persist one Diffbot call to engine_calls.
+
+    Defaults: `request_payload` = the sanitized params snapshot (no token);
+    `response_payload` = the full Diffbot body (truncated downstream).
+    Match score + hits land in `meta` so post-hoc cost queries can filter
+    high-confidence hits without parsing the JSONB body.
+    """
+    req = request_payload if request_payload is not None else resp.request_params
+    rsp = response_payload if response_payload is not None else resp.response_body
+    row = EngineCall(
+        run_id=run_id,
+        vendor="diffbot",
+        operation=operation,
+        units=1,
+        cost_usd=resp.cost_usd,
+        latency_ms=resp.latency_ms,
+        status=resp.status,
+        error=resp.error,
+        meta={
+            **(meta or {}),
+            "score": resp.score,
+            "esscore": resp.esscore,
+            "hits": resp.hits,
+            "has_entity": resp.entity is not None,
+            "kg_version": resp.kg_version,
+        },
         request_payload=_truncate_payload(req),
         response_payload=_truncate_payload(rsp),
     )

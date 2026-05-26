@@ -37,6 +37,18 @@ PARALLEL_PRICING_USD: dict[str, float] = {
     "pro":  2.50,
 }
 
+# ── Diffbot Knowledge Graph ─────────────────────────────────────────────────
+# Diffbot bills by monthly plan quota (Free=400 entities/mo, Startup/Plus=unlimited),
+# not per-call $$. We record $0 against engine_calls for parity but still log
+# the call so we can monitor latency + status + match score.
+DIFFBOT_PRICING_USD: dict[str, float] = {
+    "enhance": 0.0,
+    "dql_search": 0.0,
+    "combine":   0.0,
+    "article_extract": 0.0,
+    "nl":        0.0,
+}
+
 
 def claude_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:
     """Compute USD cost for a Claude call. Returns 0 for unknown models."""
@@ -52,3 +64,13 @@ def exa_cost_usd(operation: str, units: int = 1) -> float:
 
 def parallel_cost_usd(processor: str) -> float:
     return PARALLEL_PRICING_USD.get(processor, PARALLEL_PRICING_USD["core"])
+
+
+def diffbot_cost_usd(operation: str, units: int = 1) -> float:
+    """Diffbot calls are plan-bundled — returns $0 today.
+
+    Kept symmetric with the other engine pricing helpers so callers can sum
+    `engine_calls.cost_usd` per run without special-casing vendor. If Diffbot
+    adds per-call billing later we just bump this map.
+    """
+    return DIFFBOT_PRICING_USD.get(operation, 0.0) * units

@@ -27,7 +27,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.db import Base
 from app.models._base import TimestampsMixin, UUIDPrimaryKey
 
-VENDORS = ("exa", "anthropic", "parallel")
+VENDORS = ("exa", "anthropic", "parallel", "diffbot")
 STATUSES = ("ok", "error", "timeout")
 
 
@@ -69,7 +69,7 @@ class EngineCall(Base, UUIDPrimaryKey, TimestampsMixin):
 
     __table_args__ = (
         CheckConstraint(
-            "vendor IN ('exa','anthropic','parallel')",
+            "vendor IN ('exa','anthropic','parallel','diffbot')",
             name="ck_engine_calls_vendor",
         ),
         CheckConstraint(
