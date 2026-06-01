@@ -6,7 +6,10 @@ Three groups of endpoints, all under `/api/discovery/*`:
 - `GET  /runs/:id`                — poll run status (used as fallback by UI).
 - `GET  /articles`                — list discovered articles with filters.
 - `POST /articles/:id/dismiss`    — soft-hide an article from the Today feed.
-- `GET  /categories`              — taxonomy for the UI selector.
+- `GET  /clusters`                — grouped keyword clusters for Discovery.
+- `POST /clusters`                — create a cluster.
+- `PUT  /clusters/:id`            — edit a cluster.
+- `DELETE /clusters/:id`          — delete a cluster.
 
 The POST /runs endpoint kicks the funnel off **in-process** via
 `asyncio.create_task` so we can demo end-to-end without an arq worker. Once
@@ -28,12 +31,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
+from app.models.discovery_cluster import DiscoveryCluster
 from app.models.run import Run
 from app.models.trend_article import TrendArticle
-from app.services.categories import (
-    CATEGORIES_BY_SLUG,
-    list_categories_grouped,
-)
+from app.services.discovery_clusters import ensure_seed_clusters, slugify
 from app.services.discovery import DiscoveryParams, execute_discovery
 
 logger = logging.getLogger(__name__)
@@ -49,8 +50,7 @@ def _require_admin_in_prod(x_admin_token: str | None) -> None:
 
 
 class DiscoveryRunRequest(BaseModel):
-    category: str = Field(..., description="Category slug, e.g. 'food'")
-    keyword: str | None = Field(None, description="Optional free-text keyword")
+    cluster_id: uuid.UUID = Field(..., description="Discovery cluster id")
     date_from: date | None = None
     date_to: date | None = None
     max_articles: int = Field(15, ge=1, le=30)
@@ -59,10 +59,38 @@ class DiscoveryRunRequest(BaseModel):
 class DiscoveryRunCreated(BaseModel):
     run_id: uuid.UUID
     status: str
-    category: str
-    keyword: str | None
+    cluster_id: uuid.UUID
+    cluster_name: str
     sse_url: str
     poll_url: str
+
+
+class DiscoveryClusterIn(BaseModel):
+    name: str = Field(..., min_length=2, max_length=120)
+    group_name: str = Field(default="Custom", min_length=2, max_length=120)
+    description: str | None = Field(default=None, max_length=1000)
+    keywords: list[str] = Field(..., min_length=1)
+    is_enabled: bool = True
+    is_default: bool = False
+
+
+class DiscoveryClusterOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    slug: str
+    group_name: str
+    description: str | None
+    keywords: list[str]
+    is_enabled: bool
+    is_default: bool
+    sort_order: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class DiscoveryClusterGroups(BaseModel):
+    groups: dict[str, list[DiscoveryClusterOut]]
+    default_cluster_id: uuid.UUID | None
 
 
 class RunStatus(BaseModel):
@@ -105,9 +133,195 @@ class ArticleOut(BaseModel):
 # ── Endpoints ───────────────────────────────────────────────────────────────
 
 
-@router.get("/categories")
-def get_categories() -> dict:
-    return {"groups": list_categories_grouped()}
+def _clean_keywords(keywords: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for kw in keywords:
+        v = (kw or "").strip()
+        if not v:
+            continue
+        k = v.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(v)
+    return out
+
+
+def _cluster_to_out(c: DiscoveryCluster) -> DiscoveryClusterOut:
+    return DiscoveryClusterOut(
+        id=c.id,
+        name=c.name,
+        slug=c.slug,
+        group_name=c.group_name,
+        description=c.description,
+        keywords=list(c.keywords or []),
+        is_enabled=c.is_enabled,
+        is_default=c.is_default,
+        sort_order=c.sort_order,
+        created_at=c.created_at,
+        updated_at=c.updated_at,
+    )
+
+
+@router.get("/clusters", response_model=DiscoveryClusterGroups)
+async def list_clusters(
+    session: AsyncSession = Depends(get_session),
+) -> DiscoveryClusterGroups:
+    await ensure_seed_clusters(session)
+    rows = (
+        await session.execute(
+            select(DiscoveryCluster).order_by(
+                DiscoveryCluster.group_name.asc(),
+                DiscoveryCluster.sort_order.asc(),
+                DiscoveryCluster.created_at.asc(),
+            )
+        )
+    ).scalars().all()
+    groups: dict[str, list[DiscoveryClusterOut]] = {}
+    default_cluster_id: uuid.UUID | None = None
+    for c in rows:
+        o = _cluster_to_out(c)
+        groups.setdefault(c.group_name, []).append(o)
+        if c.is_default:
+            default_cluster_id = c.id
+    return DiscoveryClusterGroups(groups=groups, default_cluster_id=default_cluster_id)
+
+
+@router.post("/clusters", response_model=DiscoveryClusterOut, status_code=201)
+async def create_cluster(
+    body: DiscoveryClusterIn,
+    x_admin_token: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_session),
+) -> DiscoveryClusterOut:
+    _require_admin_in_prod(x_admin_token)
+    await ensure_seed_clusters(session)
+    keywords = _clean_keywords(body.keywords)
+    if not keywords:
+        raise HTTPException(400, "keywords must include at least one non-empty value")
+    slug = slugify(body.name)
+    exists = (
+        await session.execute(select(DiscoveryCluster.id).where(DiscoveryCluster.slug == slug))
+    ).scalar_one_or_none()
+    if exists is not None:
+        slug = f"{slug}-{str(uuid.uuid4())[:8]}"
+    sort_order = (
+        (await session.execute(select(DiscoveryCluster.sort_order).order_by(DiscoveryCluster.sort_order.desc()).limit(1)))
+        .scalar_one_or_none()
+    ) or 0
+    c = DiscoveryCluster(
+        name=body.name.strip(),
+        slug=slug,
+        group_name=body.group_name.strip() or "Custom",
+        description=(body.description or "").strip() or None,
+        keywords=keywords,
+        is_enabled=body.is_enabled,
+        is_default=body.is_default,
+        sort_order=sort_order + 1,
+    )
+    session.add(c)
+    await session.flush()
+    if c.is_default:
+        others = (
+            await session.execute(
+                select(DiscoveryCluster).where(
+                    DiscoveryCluster.id != c.id,
+                    DiscoveryCluster.is_default.is_(True),
+                )
+            )
+        ).scalars().all()
+        for row in others:
+            row.is_default = False
+    await session.commit()
+    await session.refresh(c)
+    return _cluster_to_out(c)
+
+
+@router.put("/clusters/{cluster_id}", response_model=DiscoveryClusterOut)
+async def update_cluster(
+    cluster_id: uuid.UUID,
+    body: DiscoveryClusterIn,
+    x_admin_token: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_session),
+) -> DiscoveryClusterOut:
+    _require_admin_in_prod(x_admin_token)
+    await ensure_seed_clusters(session)
+    c = await session.get(DiscoveryCluster, cluster_id)
+    if c is None:
+        raise HTTPException(404, "cluster not found")
+    keywords = _clean_keywords(body.keywords)
+    if not keywords:
+        raise HTTPException(400, "keywords must include at least one non-empty value")
+    maybe_slug = slugify(body.name)
+    if maybe_slug != c.slug:
+        conflict = (
+            await session.execute(
+                select(DiscoveryCluster.id).where(
+                    DiscoveryCluster.slug == maybe_slug,
+                    DiscoveryCluster.id != c.id,
+                )
+            )
+        ).scalar_one_or_none()
+        c.slug = maybe_slug if conflict is None else f"{maybe_slug}-{str(c.id)[:8]}"
+    c.name = body.name.strip()
+    c.group_name = body.group_name.strip() or "Custom"
+    c.description = (body.description or "").strip() or None
+    c.keywords = keywords
+    c.is_enabled = body.is_enabled
+    old_default = c.is_default
+    c.is_default = body.is_default
+    if c.is_default:
+        others = (
+            await session.execute(
+                select(DiscoveryCluster).where(
+                    DiscoveryCluster.id != c.id,
+                    DiscoveryCluster.is_default.is_(True),
+                )
+            )
+        ).scalars().all()
+        for row in others:
+            row.is_default = False
+    elif old_default:
+        replacement = (
+            await session.execute(
+                select(DiscoveryCluster).where(DiscoveryCluster.id != c.id).order_by(
+                    DiscoveryCluster.sort_order.asc(), DiscoveryCluster.created_at.asc()
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+        if replacement is not None:
+            replacement.is_default = True
+    await session.commit()
+    await session.refresh(c)
+    return _cluster_to_out(c)
+
+
+@router.delete("/clusters/{cluster_id}")
+async def delete_cluster(
+    cluster_id: uuid.UUID,
+    x_admin_token: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, bool]:
+    _require_admin_in_prod(x_admin_token)
+    await ensure_seed_clusters(session)
+    c = await session.get(DiscoveryCluster, cluster_id)
+    if c is None:
+        return {"ok": True}
+    was_default = c.is_default
+    await session.delete(c)
+    await session.flush()
+    if was_default:
+        replacement = (
+            await session.execute(
+                select(DiscoveryCluster).order_by(
+                    DiscoveryCluster.sort_order.asc(), DiscoveryCluster.created_at.asc()
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+        if replacement is not None:
+            replacement.is_default = True
+    await session.commit()
+    return {"ok": True}
 
 
 @router.post("/runs", response_model=DiscoveryRunCreated, status_code=202)
@@ -117,8 +331,15 @@ async def create_discovery_run(
     session: AsyncSession = Depends(get_session),
 ) -> DiscoveryRunCreated:
     _require_admin_in_prod(x_admin_token)
-    if body.category not in CATEGORIES_BY_SLUG:
-        raise HTTPException(400, f"unknown category: {body.category!r}")
+    await ensure_seed_clusters(session)
+    cluster = await session.get(DiscoveryCluster, body.cluster_id)
+    if cluster is None:
+        raise HTTPException(400, f"unknown cluster_id: {body.cluster_id}")
+    if not cluster.is_enabled:
+        raise HTTPException(400, f"cluster is disabled: {cluster.name}")
+    keywords = [str(k) for k in (cluster.keywords or []) if str(k).strip()]
+    query_core = " ".join(keywords[:8]).strip()
+    query = f"{cluster.name} {query_core}".strip()
 
     # Admission control: refuse if >5 discovery runs are already in flight.
     # Cheap guard until per-user quotas + arq concurrency limits are wired.
@@ -137,13 +358,16 @@ async def create_discovery_run(
         )
 
     run = Run(
-        query=body.keyword or f"discover:{body.category}",
+        query=f"discover:{cluster.slug}",
         source_kind="discovery",
         status="queued",
         progress_pct=0,
         engines={
-            "category": body.category,
-            "keyword": body.keyword,
+            "cluster_id": str(cluster.id),
+            "cluster_slug": cluster.slug,
+            "cluster_name": cluster.name,
+            "cluster_keywords": keywords,
+            "query": query,
             "date_from": body.date_from.isoformat() if body.date_from else None,
             "date_to": body.date_to.isoformat() if body.date_to else None,
             "max_articles": body.max_articles,
@@ -154,8 +378,10 @@ async def create_discovery_run(
     await session.refresh(run)
 
     params = DiscoveryParams(
-        category=body.category,
-        keyword=body.keyword,
+        category=cluster.slug,
+        cluster_name=cluster.name,
+        cluster_keywords=keywords,
+        search_query=query,
         date_from=body.date_from,
         date_to=body.date_to,
         max_articles=body.max_articles,
@@ -166,8 +392,8 @@ async def create_discovery_run(
     return DiscoveryRunCreated(
         run_id=run.id,
         status="queued",
-        category=body.category,
-        keyword=body.keyword,
+        cluster_id=cluster.id,
+        cluster_name=cluster.name,
         sse_url=f"/api/events/runs/{run.id}",
         poll_url=f"/api/discovery/runs/{run.id}",
     )

@@ -11,7 +11,7 @@ export default defineConfig({
     server: {
         host: "0.0.0.0",
         port: 5000,
-        strictPort: true,
+        strictPort: false,
         allowedHosts: true,
         proxy: {
             // Backend routers already include `/api` in their prefix (e.g.

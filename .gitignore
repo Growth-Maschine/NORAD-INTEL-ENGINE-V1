@@ -40,3 +40,17 @@ screenshots/
 # ── App-generated logs ─────────────────────────────────────────────────────
 apps/api/logs/
 *.log
+
+# ── Local/generated artifacts (do not commit) ──────────────────────────────
+.venv-migrate/
+*.tsbuildinfo
+docs/exports/
+docs/exports/*.json
+docs/exports/**/*_export*.json
+docs/reports/*.json
+docs/reports/*.docx
+docs/architecture/*.eraser
+docs/architecture/NORAD_STAKEHOLDER_DIAGRAMS.md
+scripts/build_unit_cost_report_docx.py
+scripts/dev_port.py
+scripts/export_companies_full_json.py

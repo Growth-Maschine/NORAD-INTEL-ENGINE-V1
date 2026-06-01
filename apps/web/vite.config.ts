@@ -12,7 +12,8 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     port: 5000,
-    strictPort: true,
+    // If 5000 is taken (common on macOS — AirPlay), try 5001, 5002, …
+    strictPort: false,
     allowedHosts: true,
     proxy: {
       // Backend routers already include `/api` in their prefix (e.g.

@@ -18,6 +18,7 @@ Discovery + observability (rev 0002):
 from app.models.app_kv import AppKV
 from app.models.card import Card
 from app.models.company import Company
+from app.models.discovery_cluster import DiscoveryCluster
 from app.models.engine_call import EngineCall
 from app.models.run import Run
 from app.models.run_event import RunEvent
@@ -29,6 +30,7 @@ __all__ = [
     "AppKV",
     "Card",
     "Company",
+    "DiscoveryCluster",
     "EngineCall",
     "Run",
     "RunEvent",

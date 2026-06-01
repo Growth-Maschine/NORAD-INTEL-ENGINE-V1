@@ -20,17 +20,20 @@ norad/
 
 ## Running locally
 
-### Backend
+Use **two terminals**. If a port is already in use, dev servers pick the next free one automatically.
+
+### Backend (API)
 
 ```bash
 cd apps/api
 pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python scripts/dev.py
 ```
 
-API docs at `http://localhost:8000/docs`.
+Opens on **8000** when free, otherwise **8001**, **8002**, … — the terminal prints the URL.  
+API docs: `http://127.0.0.1:<port>/docs`
 
-### Frontend
+### Frontend (web)
 
 ```bash
 cd apps/web
@@ -38,7 +41,15 @@ npm install
 npm run dev
 ```
 
-App at `http://localhost:5000`. Vite proxies `/api/*` → backend on `8000`.
+Opens on **5000** when free, otherwise **5001**, **5002**, … — Vite prints the URL in the terminal.  
+`/api` is proxied to `http://127.0.0.1:8000` (keep API on 8000 for local dev, or set `VITE_API_URL` in `apps/web/.env.local`).
+
+### One-liners (from repo root)
+
+```bash
+cd apps/api && python scripts/dev.py
+cd apps/web && npm run dev
+```
 
 ## Stack
 

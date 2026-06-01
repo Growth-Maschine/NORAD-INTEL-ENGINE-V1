@@ -48,7 +48,6 @@ from app.engines.claude_client import ClaudeMessage
 from app.engines.logging import log_claude_call, log_exa_call
 from app.models.run import Run
 from app.models.trend_article import TrendArticle
-from app.services.categories import get_category
 from app.services.run_events import emit, emit_with_session, set_pipeline
 
 logger = logging.getLogger(__name__)
@@ -111,6 +110,9 @@ def _is_excluded_topic(*texts: str | None) -> bool:
 class DiscoveryParams:
     category: str
     keyword: str | None = None
+    cluster_name: str | None = None
+    cluster_keywords: list[str] = field(default_factory=list)
+    search_query: str | None = None
     date_from: date | None = None
     date_to: date | None = None
     max_articles: int = TOP_N_TO_READ
@@ -259,7 +261,9 @@ async def execute_discovery(
             return result
 
         # ── Stage 3: Haiku rank ─────────────────────────────────────────────
-        kept, cost3 = await _stage3_rank(run_id, new_articles, params.max_articles, factory)
+        kept, cost3 = await _stage3_rank(
+            run_id, new_articles, params.max_articles, factory, params
+        )
         cost += cost3
         result.ranked = len(kept)
         await _bump_progress(factory, run_id, 50)
@@ -271,7 +275,7 @@ async def execute_discovery(
         await _bump_progress(factory, run_id, 75)
 
         # ── Stage 5: Sonnet extract ─────────────────────────────────────────
-        extracted, cost5 = await _stage5_extract(run_id, readable, factory)
+        extracted, cost5 = await _stage5_extract(run_id, readable, factory, params)
         cost += cost5
         result.extracted = len(extracted)
 
@@ -309,9 +313,11 @@ async def execute_discovery(
 
 async def _stage1_search(run_id: uuid.UUID, p: DiscoveryParams) -> tuple[list, float]:
     """Exa search restricted to trendhunter.com."""
-    cat = get_category(p.category)
-    # Query: keyword takes priority; otherwise use the category label.
-    query = (p.keyword or f"trending {cat.label.lower()}").strip()
+    # Query precedence:
+    # 1) explicit search_query from cluster planner
+    # 2) legacy keyword
+    # 3) fallback to category string
+    query = (p.search_query or p.keyword or f"trending {p.category}").strip()
     await emit(run_id, "stage_started", f"Stage 1 — Exa search: {query!r}",
                meta={"stage": 1, "query": query})
 
@@ -437,6 +443,7 @@ async def _stage3_rank(
     articles: list[TrendArticle],
     keep_top_n: int,
     factory: async_sessionmaker[AsyncSession],
+    p: DiscoveryParams,
 ) -> tuple[list[TrendArticle], float]:
     """One Haiku call ranks the whole batch."""
     await emit(run_id, "stage_started",
@@ -447,7 +454,18 @@ async def _stage3_rank(
         {"id": i, "title": a.title or "", "dek": a.dek or ""}
         for i, a in enumerate(articles)
     ]
+    cluster_ctx = ""
+    if p.cluster_name:
+        kws = ", ".join(p.cluster_keywords[:25]) if p.cluster_keywords else ""
+        cluster_ctx = (
+            f"DISCOVERY CLUSTER: {p.cluster_name}\n"
+            f"CLUSTER KEYWORDS: {kws or 'none'}\n"
+            "Scoring guidance: reward direct relevance to this cluster. "
+            "Generic trend pieces without clear cluster fit should score lower.\n\n"
+        )
+
     user_msg = (
+        cluster_ctx +
         "Rank these TrendHunter articles by BD/intel relevance. High scores "
         "(80+) go to articles that name a specific company, product launch, "
         "funding, or actionable market signal. Score listicles low (≤30).\n\n"
@@ -567,6 +585,7 @@ async def _stage5_extract(
     run_id: uuid.UUID,
     articles: list[TrendArticle],
     factory: async_sessionmaker[AsyncSession],
+    p: DiscoveryParams,
 ) -> tuple[list[TrendArticle], float]:
     """Per-article Sonnet extract, run with bounded concurrency."""
     if not articles:
@@ -585,7 +604,16 @@ async def _stage5_extract(
             claude = get_claude_client()
             # Truncate body to avoid runaway tokens — 16k chars ≈ 4k tokens
             body = (a.body_text or "")[:16000]
+            cluster_ctx = ""
+            if p.cluster_name:
+                kws = ", ".join(p.cluster_keywords[:25]) if p.cluster_keywords else ""
+                cluster_ctx = (
+                    f"DISCOVERY CLUSTER: {p.cluster_name}\n"
+                    f"CLUSTER KEYWORDS: {kws or 'none'}\n"
+                    "Favor subject companies that clearly match this cluster theme.\n\n"
+                )
             user_msg = (
+                cluster_ctx +
                 f"ARTICLE TITLE: {a.title}\n"
                 f"DEK: {a.dek or ''}\n\n"
                 f"BODY:\n{body}\n\n"

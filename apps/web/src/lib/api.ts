@@ -67,18 +67,36 @@ export const getHealthDb = () => api<HealthDbResponse>("/health/db");
 
 // ── Discovery types ──────────────────────────────────────────────────────────
 
-export interface CategoryRef {
+export interface DiscoveryCluster {
+  id: string;
+  name: string;
   slug: string;
-  label: string;
-  th_url: string;
+  group_name: string;
+  description: string | null;
+  keywords: string[];
+  is_enabled: boolean;
+  is_default: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
 }
-export interface CategoryGroups {
-  groups: Record<string, CategoryRef[]>;
+
+export interface DiscoveryClusterGroups {
+  groups: Record<string, DiscoveryCluster[]>;
+  default_cluster_id: string | null;
+}
+
+export interface DiscoveryClusterInput {
+  name: string;
+  group_name: string;
+  description?: string | null;
+  keywords: string[];
+  is_enabled?: boolean;
+  is_default?: boolean;
 }
 
 export interface DiscoveryRunRequest {
-  category: string;
-  keyword?: string | null;
+  cluster_id: string;
   date_from?: string | null;
   date_to?: string | null;
   max_articles?: number;
@@ -87,8 +105,8 @@ export interface DiscoveryRunRequest {
 export interface DiscoveryRunCreated {
   run_id: string;
   status: string;
-  category: string;
-  keyword: string | null;
+  cluster_id: string;
+  cluster_name: string;
   sse_url: string;
   poll_url: string;
 }
@@ -158,7 +176,26 @@ export interface RunEvent {
 
 // ── Discovery endpoints ──────────────────────────────────────────────────────
 
-export const getCategories = () => api<CategoryGroups>("/api/discovery/categories");
+export const getDiscoveryClusters = () =>
+  api<DiscoveryClusterGroups>("/api/discovery/clusters");
+
+export const createDiscoveryCluster = (body: DiscoveryClusterInput) =>
+  api<DiscoveryCluster>("/api/discovery/clusters", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const updateDiscoveryCluster = (
+  id: string,
+  body: DiscoveryClusterInput,
+) =>
+  api<DiscoveryCluster>(`/api/discovery/clusters/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+
+export const deleteDiscoveryCluster = (id: string) =>
+  api<{ ok: boolean }>(`/api/discovery/clusters/${id}`, { method: "DELETE" });
 
 export const startDiscoveryRun = (body: DiscoveryRunRequest) =>
   api<DiscoveryRunCreated>("/api/discovery/runs", {

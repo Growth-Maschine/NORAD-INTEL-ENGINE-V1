@@ -7,8 +7,10 @@ FastAPI backend for the NORAD brand intelligence engine.
 ```bash
 cd apps/api
 pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python scripts/dev.py
 ```
+
+Uses port **8000** when free, otherwise the next available port (prints the URL).
 
 ## Endpoints
 

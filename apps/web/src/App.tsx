@@ -6,6 +6,7 @@ import Discover from "./pages/Discover";
 import Run from "./pages/Run";
 import Companies from "./pages/Companies";
 import CompanyDetail from "./pages/CompanyDetail";
+import DiscoveryClusters from "./pages/DiscoveryClusters";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
@@ -15,6 +16,7 @@ export default function App() {
       <Route element={<AppShell />}>
         <Route index element={<Home />} />
         <Route path="/discover" element={<Discover />} />
+        <Route path="/discovery-clusters" element={<DiscoveryClusters />} />
         <Route path="/runs/:id" element={<Run />} />
         <Route path="/companies" element={<Companies />} />
         <Route path="/companies/:id" element={<CompanyDetail />} />

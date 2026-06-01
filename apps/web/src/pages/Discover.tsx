@@ -5,18 +5,17 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ArticleCardSkeleton } from "@/components/discover/ArticleCardSkeleton";
-import { CategoryPicker } from "@/components/discover/CategoryPicker";
-import { KeywordPicker } from "@/components/discover/KeywordPicker";
+import { DiscoveryClusterPicker } from "@/components/discover/DiscoveryClusterPicker";
 import { ResearchCountdown } from "@/components/discover/ResearchCountdown";
 import { RunFeed } from "@/components/discover/RunFeed";
 import { RunGroup, type RunGroupData } from "@/components/discover/RunGroup";
 import { Topbar } from "@/components/layout/Topbar";
-import { WATCHLIST } from "@/lib/watchlist";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/Dialog";
 import { PageBody } from "@/components/ui/PageBody";
 import { HoverTip } from "@/components/ui/Tooltip";
 import {
+  getDiscoveryClusters,
   getRun,
   listArticles,
   listRuns,
@@ -39,6 +38,7 @@ import { cn } from "@/lib/utils";
  * The right column is the live SSE event feed.
  */
 type DateRange = { from: string; to: string; label: string; hint: string };
+const CLUSTER_PREF_KEY = "norad.discovery.selected_cluster_id";
 
 const RANGE_PRESETS: DateRange[] = [
   { label: "3 days", hint: "3d", ...rangeFromDays(3) },
@@ -100,8 +100,7 @@ function rangeFromDays(days: number): { from: string; to: string } {
 }
 
 export default function Discover() {
-  const [category, setCategory] = useState("food");
-  const [keyword, setKeyword] = useState("");
+  const [selectedClusterId, setSelectedClusterId] = useState<string>("");
   const initial = RANGE_PRESETS[2];
   const [dateFrom, setDateFrom] = useState<string>(initial.from);
   const [dateTo, setDateTo] = useState<string>(initial.to);
@@ -114,6 +113,44 @@ export default function Discover() {
 
   const qc = useQueryClient();
   const navigate = useNavigate();
+
+  const clustersQuery = useQuery({
+    queryKey: ["discovery-clusters"],
+    queryFn: getDiscoveryClusters,
+    staleTime: 30_000,
+  });
+  const allClusters = useMemo(
+    () =>
+      Object.values(clustersQuery.data?.groups ?? {})
+        .flat()
+        .filter((c) => c.is_enabled),
+    [clustersQuery.data],
+  );
+  const selectedCluster =
+    allClusters.find((c) => c.id === selectedClusterId) ?? null;
+
+  useEffect(() => {
+    if (!allClusters.length) return;
+    const defaultId =
+      clustersQuery.data?.default_cluster_id ?? allClusters[0]?.id ?? "";
+    let preferred = defaultId;
+    try {
+      const saved = window.localStorage.getItem(CLUSTER_PREF_KEY);
+      if (saved && allClusters.some((c) => c.id === saved)) preferred = saved;
+    } catch {
+      /* ignore */
+    }
+    setSelectedClusterId((curr) => curr || preferred);
+  }, [allClusters, clustersQuery.data?.default_cluster_id]);
+
+  useEffect(() => {
+    if (!selectedClusterId) return;
+    try {
+      window.localStorage.setItem(CLUSTER_PREF_KEY, selectedClusterId);
+    } catch {
+      /* ignore */
+    }
+  }, [selectedClusterId]);
 
   // Two-stage research flow:
   //   1. Profile click → `pendingResearch` opens the confirmation modal.
@@ -187,11 +224,12 @@ export default function Discover() {
     refetchInterval: runActive ? 4000 : 30000,
   });
 
-  // Articles for the current category.
+  // Articles for the selected cluster (stored in trend_articles.category as cluster slug).
   const articlesQuery = useQuery({
-    queryKey: ["articles", category],
+    queryKey: ["articles", selectedCluster?.slug],
     queryFn: () =>
-      listArticles({ category, status: "extracted", limit: 100 }),
+      listArticles({ category: selectedCluster?.slug, status: "extracted", limit: 100 }),
+    enabled: !!selectedCluster,
     refetchInterval: runActive ? 4000 : 30000,
   });
 
@@ -214,8 +252,7 @@ export default function Discover() {
   const startMut = useMutation({
     mutationFn: () =>
       startDiscoveryRun({
-        category,
-        keyword: keyword.trim() || null,
+        cluster_id: selectedClusterId,
         date_from: dateFrom || null,
         date_to: dateTo || null,
         max_articles: 10,
@@ -227,7 +264,7 @@ export default function Discover() {
       setExpandedRuns({ [r.run_id]: true });
       qc.invalidateQueries({ queryKey: ["discovery-runs"] });
       toast.message("Discovery run started", {
-        description: `Category: ${category}${keyword ? ` · "${keyword}"` : ""}`,
+        description: `Cluster: ${r.cluster_name}`,
       });
     },
     onError: (err) => {
@@ -346,6 +383,7 @@ export default function Discover() {
   };
 
   const hasAnything = groups.length > 0;
+  const canDiscover = !runActive && !startMut.isPending && !!selectedClusterId;
 
   return (
     <>
@@ -356,29 +394,25 @@ export default function Discover() {
       <PageBody>
         {/* Control bar */}
         <section className="mb-6 rounded-xl border border-border bg-white p-4 shadow-soft sm:p-5">
-          <div className="grid gap-3 md:grid-cols-[260px_1fr_auto]">
-            <CategoryPicker
-              value={category}
-              onChange={setCategory}
-              activeKeyword={keyword}
-              onKeyword={setKeyword}
-              watchlist={WATCHLIST}
-            />
-            <KeywordPicker
-              value={keyword}
-              onChange={setKeyword}
-              onSubmit={() => {
-                if (!runActive && !startMut.isPending) startMut.mutate();
-              }}
+          <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+            <DiscoveryClusterPicker
+              groups={Object.fromEntries(
+                Object.entries(clustersQuery.data?.groups ?? {}).map(([g, items]) => [
+                  g,
+                  items.filter((c) => c.is_enabled),
+                ]),
+              )}
+              value={selectedClusterId}
+              onChange={setSelectedClusterId}
               disabled={startMut.isPending || runActive}
             />
             <HoverTip
-              label={runActive ? "A run is already in progress" : "Start a discovery run (Enter)"}
+              label={runActive ? "A run is already in progress" : "Start a discovery run"}
             >
               <span tabIndex={0} className="inline-flex">
                 <Button
                   onClick={() => startMut.mutate()}
-                  disabled={startMut.isPending || runActive}
+                  disabled={!canDiscover}
                   className="min-w-[120px]"
                 >
                   {startMut.isPending || runActive ? (
@@ -578,7 +612,7 @@ function EmptyState({
       <p className="mx-auto mt-1 max-w-xs text-xs leading-relaxed text-soft">
         {hasRun
           ? "Articles appear here as they're ranked and extracted."
-          : "Pick a category, set a date range, and click Discover to surface fresh signal from TrendHunter."}
+          : "Pick a discovery cluster, set a date range, and click Discover to surface fresh signal from TrendHunter."}
       </p>
     </div>
   );
