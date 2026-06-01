@@ -95,6 +95,18 @@ export interface DiscoveryClusterInput {
   is_default?: boolean;
 }
 
+// Legacy category picker compatibility types.
+// Kept so older UI components compile while Discovery Clusters fully replace
+// category taxonomy on Today.
+export interface CategoryRef {
+  slug: string;
+  label: string;
+  th_url: string;
+}
+export interface CategoryGroups {
+  groups: Record<string, CategoryRef[]>;
+}
+
 export interface DiscoveryRunRequest {
   cluster_id: string;
   date_from?: string | null;
@@ -178,6 +190,21 @@ export interface RunEvent {
 
 export const getDiscoveryClusters = () =>
   api<DiscoveryClusterGroups>("/api/discovery/clusters");
+
+export const getCategories = async (): Promise<CategoryGroups> => {
+  const data = await getDiscoveryClusters();
+  const groups: Record<string, CategoryRef[]> = {};
+  for (const [group, items] of Object.entries(data.groups)) {
+    groups[group] = items
+      .filter((c) => c.is_enabled)
+      .map((c) => ({
+        slug: c.slug,
+        label: c.name,
+        th_url: "",
+      }));
+  }
+  return { groups };
+};
 
 export const createDiscoveryCluster = (body: DiscoveryClusterInput) =>
   api<DiscoveryCluster>("/api/discovery/clusters", {
