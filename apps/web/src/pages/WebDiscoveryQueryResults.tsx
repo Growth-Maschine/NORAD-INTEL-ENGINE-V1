@@ -26,6 +26,8 @@ import {
   getWebDiscoveryQuery,
   getWebDiscoveryQueryResults,
   listWebDiscoveryClusterRuns,
+  type WebDiscoveryQueryRun,
+  type WebDiscoveryRun,
   type WebDiscoveryQueryResultsPayload,
   type WebDiscoveryResultItem,
 } from "@/lib/api";
@@ -54,9 +56,9 @@ export default function WebDiscoveryQueryResults() {
     queryFn: () => getWebDiscoveryQuery(queryId),
     enabled: !!queryId,
   });
-  const runsQuery = useQuery({
+  const clusterRunsQuery = useQuery({
     queryKey: ["web-discovery-runs", clusterId],
-    queryFn: () => listWebDiscoveryClusterRuns(clusterId, 15),
+    queryFn: () => listWebDiscoveryClusterRuns(clusterId, 30),
     enabled: !!clusterId,
   });
   const resultsQuery = useQuery({
@@ -69,6 +71,20 @@ export default function WebDiscoveryQueryResults() {
   const payload = resultsQuery.data;
   const label = payload?.query_label ?? queryDetail.data?.label ?? "Query";
   const searchQuery = payload?.search_query ?? queryDetail.data?.search_query ?? "";
+
+  const runOptions = useMemo((): WebDiscoveryQueryRun[] => {
+    if (payload?.available_runs?.length) {
+      return payload.available_runs;
+    }
+    if (clusterRunsQuery.data?.length && queryId) {
+      return buildQueryRunOptionsFromClusterRuns(
+        clusterRunsQuery.data,
+        queryId,
+        label,
+      );
+    }
+    return [];
+  }, [payload?.available_runs, clusterRunsQuery.data, queryId, label]);
 
   const processedResults = useMemo(() => {
     const rows = payload?.results ?? [];
@@ -269,7 +285,7 @@ export default function WebDiscoveryQueryResults() {
           </div>
 
           <aside className="space-y-3 xl:sticky xl:top-4 xl:self-start">
-            <RunIntelPanel payload={payload} runs={runsQuery.data} runId={runId} />
+            <RunIntelPanel payload={payload} runs={runOptions} runId={runId} />
             <div className="rounded-xl border border-border bg-[#FCFCFB] p-4 text-xs leading-relaxed text-muted">
               <p className="font-semibold text-ink">Reading guide</p>
               <ul className="mt-2 list-inside list-disc space-y-1.5">
@@ -546,37 +562,77 @@ function RunIntelPanel({
   runId,
 }: {
   payload: WebDiscoveryQueryResultsPayload | undefined;
-  runs: { id: string; created_at: string; status: string }[] | undefined;
+  runs: WebDiscoveryQueryRun[] | undefined;
   runId: string | undefined;
 }) {
   const navigate = useNavigate();
   const { clusterId = "", queryId = "" } = useParams();
   const [, setSearchParams] = useSearchParams();
 
+  const activeRunId = runId ?? payload?.run_id;
+  const matchedRun = runs?.find((run) => run.id === activeRunId) ?? runs?.[0];
+  const queryLabel = payload?.query_label ?? "Query";
+  const currentRun: WebDiscoveryQueryRun | undefined =
+    matchedRun ??
+    (activeRunId && payload
+      ? {
+          id: activeRunId,
+          display_name: `${queryLabel} · ${new Date(
+            payload.completed_at ?? Date.now(),
+          ).toLocaleString()}`,
+          status: payload.status,
+          result_count: payload.result_count,
+          completed_at: payload.completed_at,
+          created_at: payload.completed_at ?? new Date().toISOString(),
+          run_scope: null,
+        }
+      : undefined);
+  const when = payload?.completed_at ?? currentRun?.completed_at ?? currentRun?.created_at;
+
   return (
     <div className="rounded-xl border border-border bg-white p-4 shadow-soft">
       <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-soft">
         Run snapshot
       </p>
-      {payload?.completed_at ? (
-        <p className="mt-2 text-sm font-medium text-ink">
-          {new Date(payload.completed_at).toLocaleString()}
+      {currentRun ? (
+        <p className="mt-2 text-base font-semibold leading-snug text-ink">
+          {currentRun.display_name}
         </p>
       ) : (
         <p className="mt-2 text-sm text-soft">—</p>
       )}
-      {payload?.run_id ? (
-        <p className="mt-1 font-mono text-[10px] text-soft">ID {payload.run_id.slice(0, 8)}…</p>
+      {when ? (
+        <p className="mt-1 text-xs text-muted">{new Date(when).toLocaleString()}</p>
+      ) : null}
+      {currentRun ? (
+        <p className="mt-1.5 flex flex-wrap items-center gap-2 text-[10px] text-soft">
+          <span
+            className={cn(
+              "rounded-full px-2 py-0.5 font-semibold uppercase tracking-wider",
+              currentRun.status === "completed"
+                ? "bg-[#E8F5E9] text-[#2D6A3E]"
+                : "bg-[#F4F1EA] text-muted",
+            )}
+          >
+            {currentRun.status}
+          </span>
+          {currentRun.result_count > 0 ? (
+            <span>{currentRun.result_count} sources</span>
+          ) : null}
+          {activeRunId ? (
+            <span className="font-mono">ID {activeRunId.slice(0, 8)}…</span>
+          ) : null}
+        </p>
       ) : null}
 
       {runs && runs.length > 1 ? (
         <div className="mt-4">
           <label className="text-[10px] font-semibold uppercase tracking-wider text-soft">
-            Other runs
+            Switch run
           </label>
           <select
-            className="mt-1 h-9 w-full rounded-lg border border-border bg-[#FCFCFB] px-2 text-xs"
-            value={runId ?? payload?.run_id ?? ""}
+            className="mt-1 h-10 w-full rounded-lg border border-border bg-[#FCFCFB] px-2.5 text-sm font-medium text-ink"
+            value={activeRunId ?? ""}
             onChange={(e) => {
               const id = e.target.value;
               if (id) setSearchParams({ run: id });
@@ -584,7 +640,7 @@ function RunIntelPanel({
           >
             {runs.map((run) => (
               <option key={run.id} value={run.id}>
-                {run.status} · {new Date(run.created_at).toLocaleString()}
+                {run.display_name}
               </option>
             ))}
           </select>
@@ -951,6 +1007,67 @@ function formatDate(value: string | null): string | null {
     year: "numeric",
     month: "short",
     day: "numeric",
+  });
+}
+
+function querySliceFromClusterRun(
+  run: WebDiscoveryRun,
+  queryId: string,
+): { result_count?: number } | null {
+  const queries = run.engine_outputs?.queries;
+  if (!Array.isArray(queries)) return null;
+  const slice = queries.find(
+    (item) =>
+      item &&
+      typeof item === "object" &&
+      String((item as { query_id?: string }).query_id) === queryId,
+  );
+  return slice && typeof slice === "object"
+    ? (slice as { result_count?: number })
+    : null;
+}
+
+function buildQueryRunOptionsFromClusterRuns(
+  runs: WebDiscoveryRun[],
+  queryId: string,
+  queryLabel: string,
+): WebDiscoveryQueryRun[] {
+  const chronological = [...runs].sort(
+    (a, b) => Date.parse(a.created_at) - Date.parse(b.created_at),
+  );
+  const matched: Array<{ run: WebDiscoveryRun; slice: { result_count?: number }; n: number }> =
+    [];
+  let runNumber = 0;
+  for (const run of chronological) {
+    const slice = querySliceFromClusterRun(run, queryId);
+    if (!slice) continue;
+    runNumber += 1;
+    matched.push({ run, slice, n: runNumber });
+  }
+
+  return [...matched].reverse().map(({ run, slice, n }) => {
+    const engines = run.engines ?? {};
+    const stored = engines.display_name;
+    const rc = Number(slice.result_count ?? 0);
+    const scope = engines.run_scope as string | undefined;
+    let display_name =
+      typeof stored === "string" && stored.trim()
+        ? stored.trim()
+        : scope === "cluster_all"
+          ? `${queryLabel} · Cluster batch · ${n}`
+          : `${queryLabel} · Run ${n}`;
+    if (rc > 0 && !display_name.includes("sources")) {
+      display_name = `${display_name} · ${rc} sources`;
+    }
+    return {
+      id: run.id,
+      display_name,
+      status: run.status,
+      result_count: rc,
+      completed_at: run.completed_at,
+      created_at: run.created_at,
+      run_scope: typeof scope === "string" ? scope : null,
+    };
   });
 }
 

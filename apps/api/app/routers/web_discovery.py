@@ -179,12 +179,25 @@ class WebDiscoveryRunOut(BaseModel):
     progress_pct: int
     source_kind: str
     query: str
+    display_name: str
     engines: dict[str, Any]
     engine_outputs: dict[str, Any]
     started_at: datetime | None
     completed_at: datetime | None
     error: str | None
     created_at: datetime
+
+
+class WebDiscoveryQueryRunOut(BaseModel):
+    """One completed (or in-flight) run that includes results for a specific query."""
+
+    id: uuid.UUID
+    display_name: str
+    status: str
+    result_count: int
+    completed_at: datetime | None
+    created_at: datetime
+    run_scope: str | None = None
 
 
 class WebDiscoveryResultItem(BaseModel):
@@ -217,6 +230,7 @@ class WebDiscoveryQueryResultsOut(BaseModel):
     num_results: int | None = None
     content_modes: list[str] = Field(default_factory=list)
     results: list[WebDiscoveryResultItem]
+    available_runs: list[WebDiscoveryQueryRunOut] = Field(default_factory=list)
 
 
 def _cluster_out(c: WebDiscoveryCluster, query_count: int | None = None) -> WebDiscoveryClusterOut:
@@ -240,6 +254,93 @@ def _cluster_out(c: WebDiscoveryCluster, query_count: int | None = None) -> WebD
     )
 
 
+def _stored_run_display_name(run: Run) -> str | None:
+    engines = run.engines if isinstance(run.engines, dict) else {}
+    raw = engines.get("display_name")
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return text or None
+
+
+def _count_runs_with_query_slice(
+    runs: list[Run],
+    query_id: uuid.UUID,
+    *,
+    only_completed: bool = False,
+) -> int:
+    n = 0
+    for candidate in runs:
+        if only_completed and candidate.status != "completed":
+            continue
+        if _query_slice_from_run(candidate, query_id) is not None:
+            n += 1
+    return n
+
+
+async def _cluster_web_discovery_runs(
+    session: AsyncSession,
+    cluster_id: uuid.UUID,
+    *,
+    limit: int = 100,
+) -> list[Run]:
+    stmt = (
+        select(Run)
+        .where(
+            Run.source_kind == "web_discovery",
+            Run.engines["cluster_id"].astext == str(cluster_id),
+        )
+        .order_by(Run.created_at.asc())
+        .limit(max(1, min(limit, 100)))
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+def _resolve_query_run_display_name(
+    run: Run,
+    query_label: str,
+    run_number: int,
+    result_count: int,
+) -> str:
+    stored = _stored_run_display_name(run)
+    if stored:
+        return stored
+    engines = run.engines if isinstance(run.engines, dict) else {}
+    scope = engines.get("run_scope")
+    if scope == "cluster_all":
+        base = f"{query_label} · Cluster batch"
+    else:
+        base = f"{query_label} · Run {run_number}"
+    if result_count > 0:
+        return f"{base} · {result_count} sources"
+    return base
+
+
+def _fallback_cluster_run_display_name(run: Run) -> str:
+    stored = _stored_run_display_name(run)
+    if stored:
+        return stored
+    engines = run.engines if isinstance(run.engines, dict) else {}
+    cluster_name = str(engines.get("cluster_name") or "Discovery")
+    scope = engines.get("run_scope")
+    ts = run.completed_at or run.created_at
+    when = _format_run_when(ts)
+    if scope == "cluster_all":
+        qc = engines.get("query_count")
+        if qc:
+            return f"{cluster_name} · All queries ({qc}) · {when}"
+        return f"{cluster_name} · Batch · {when}"
+    return f"{cluster_name} · {when}"
+
+
+def _format_run_when(dt: datetime | None) -> str:
+    if dt is None:
+        return "—"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).strftime("%d %b %Y, %H:%M UTC")
+
+
 def _run_out(r: Run) -> WebDiscoveryRunOut:
     return WebDiscoveryRunOut(
         id=r.id,
@@ -247,6 +348,7 @@ def _run_out(r: Run) -> WebDiscoveryRunOut:
         progress_pct=r.progress_pct,
         source_kind=r.source_kind,
         query=r.query,
+        display_name=_fallback_cluster_run_display_name(r),
         engines=dict(r.engines or {}),
         engine_outputs=dict(r.engine_outputs or {}),
         started_at=r.started_at,
@@ -465,6 +567,23 @@ async def start_web_discovery_cluster_run(
             f"too many web discovery runs in flight ({len(in_flight)}); wait for one to finish.",
         )
 
+    prior_runs = await _cluster_web_discovery_runs(session, cluster.id, limit=100)
+    if target_query_id is not None:
+        q = active_queries[0]
+        run_no = _count_runs_with_query_slice(
+            prior_runs, target_query_id, only_completed=True
+        ) + 1
+        display_name = f"{q.label} · Run {run_no}"
+    else:
+        batch_no = sum(
+            1
+            for r in prior_runs
+            if isinstance(r.engines, dict)
+            and r.engines.get("run_scope") == "cluster_all"
+            and r.status == "completed"
+        ) + 1
+        display_name = f"{cluster.name} · Batch · Run {batch_no}"
+
     run = Run(
         query=f"web-discovery:{cluster.slug}",
         source_kind="web_discovery",
@@ -479,6 +598,7 @@ async def start_web_discovery_cluster_run(
             "query_ids": [str(q.id) for q in active_queries],
             "run_scope": "single_query" if target_query_id else "cluster_all",
             "target_query_id": str(target_query_id) if target_query_id else None,
+            "display_name": display_name,
         },
     )
     session.add(run)
@@ -689,6 +809,47 @@ def _query_slice_from_run(run: Run, query_id: uuid.UUID) -> dict[str, Any] | Non
         if isinstance(item, dict) and str(item.get("query_id")) == qid:
             return item
     return None
+
+
+async def _query_run_list_for_row(
+    session: AsyncSession,
+    row: WebDiscoveryQuery,
+    *,
+    limit: int = 30,
+) -> list[WebDiscoveryQueryRunOut]:
+    """Runs that include this query — newest first, with human-readable names."""
+    cluster_runs = await _cluster_web_discovery_runs(session, row.cluster_id, limit=100)
+    matched: list[tuple[Run, dict[str, Any], int]] = []
+    run_number = 0
+    for run in cluster_runs:
+        slice_ = _query_slice_from_run(run, row.id)
+        if slice_ is None:
+            continue
+        run_number += 1
+        matched.append((run, slice_, run_number))
+
+    out: list[WebDiscoveryQueryRunOut] = []
+    for run, slice_, number in reversed(matched):
+        rc = int(
+            slice_.get("result_count") or len(_normalize_result_items(slice_.get("results")))
+        )
+        engines = run.engines if isinstance(run.engines, dict) else {}
+        out.append(
+            WebDiscoveryQueryRunOut(
+                id=run.id,
+                display_name=_resolve_query_run_display_name(
+                    run, row.label, number, rc
+                ),
+                status=run.status,
+                result_count=rc,
+                completed_at=run.completed_at,
+                created_at=run.created_at,
+                run_scope=str(engines.get("run_scope")) if engines.get("run_scope") else None,
+            )
+        )
+        if len(out) >= max(1, min(limit, 50)):
+            break
+    return out
 
 
 async def _execute_web_discovery_run(
@@ -903,6 +1064,19 @@ async def get_web_discovery_query(
     return _query_out(row)
 
 
+@router.get("/queries/{query_id}/runs", response_model=list[WebDiscoveryQueryRunOut])
+async def list_web_discovery_query_runs(
+    query_id: uuid.UUID,
+    limit: int = 30,
+    session: AsyncSession = Depends(get_session),
+) -> list[WebDiscoveryQueryRunOut]:
+    """Runs that produced (or are producing) results for this query — newest first."""
+    row = await session.get(WebDiscoveryQuery, query_id)
+    if row is None:
+        raise HTTPException(404, "web discovery query not found")
+    return await _query_run_list_for_row(session, row, limit=limit)
+
+
 @router.get("/queries/{query_id}/results", response_model=WebDiscoveryQueryResultsOut)
 async def get_web_discovery_query_results(
     query_id: uuid.UUID,
@@ -979,6 +1153,8 @@ async def get_web_discovery_query_results(
     if row.content_summary:
         content_modes.append("summary")
 
+    available_runs = await _query_run_list_for_row(session, row, limit=30)
+
     return WebDiscoveryQueryResultsOut(
         query_id=query_id,
         run_id=run.id,
@@ -994,6 +1170,7 @@ async def get_web_discovery_query_results(
         num_results=row.num_results,
         content_modes=content_modes,
         results=[WebDiscoveryResultItem(**item) for item in results],
+        available_runs=available_runs,
     )
 
 

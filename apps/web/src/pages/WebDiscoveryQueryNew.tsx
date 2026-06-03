@@ -347,6 +347,7 @@ export default function WebDiscoveryQueryNew() {
     if (!isEditMode || !queryId || redirectedRunRef.current === run) return;
     redirectedRunRef.current = run;
     qc.invalidateQueries({ queryKey: ["web-discovery-query-results", queryId] });
+    qc.invalidateQueries({ queryKey: ["web-discovery-query-runs", queryId] });
     navigate(
       `/discover-web/clusters/${clusterId}/queries/${queryId}/results?run=${run}`,
     );
@@ -493,6 +494,7 @@ export default function WebDiscoveryQueryNew() {
       });
       qc.invalidateQueries({ queryKey: ["web-discovery-runs", clusterId] });
       if (isEditMode && queryId) {
+        qc.invalidateQueries({ queryKey: ["web-discovery-query-runs", queryId] });
         localStorage.setItem(`web_discovery_query_has_run_${queryId}`, "1");
       }
       recentRunEvents(created.run_id, 120)

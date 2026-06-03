@@ -383,12 +383,23 @@ export interface WebDiscoveryRun {
   progress_pct: number;
   source_kind: string;
   query: string;
+  display_name?: string;
   engines: Record<string, unknown>;
   engine_outputs: Record<string, unknown>;
   started_at: string | null;
   completed_at: string | null;
   error: string | null;
   created_at: string;
+}
+
+export interface WebDiscoveryQueryRun {
+  id: string;
+  display_name: string;
+  status: string;
+  result_count: number;
+  completed_at: string | null;
+  created_at: string;
+  run_scope: string | null;
 }
 
 export interface WebDiscoveryRunCreated {
@@ -449,6 +460,11 @@ export const startWebDiscoveryClusterRun = (clusterId: string, queryId?: string)
 export const listWebDiscoveryClusterRuns = (clusterId: string, limit = 20) =>
   api<WebDiscoveryRun[]>(`/api/web-discovery/clusters/${clusterId}/runs?limit=${limit}`);
 
+export const listWebDiscoveryQueryRuns = (queryId: string, limit = 30) =>
+  api<WebDiscoveryQueryRun[]>(
+    `/api/web-discovery/queries/${queryId}/runs?limit=${limit}`,
+  );
+
 export const getWebDiscoveryRun = (runId: string) =>
   api<WebDiscoveryRun>(`/api/web-discovery/runs/${runId}`);
 
@@ -482,6 +498,7 @@ export interface WebDiscoveryQueryResultsPayload {
   num_results?: number | null;
   content_modes?: string[];
   results: WebDiscoveryResultItem[];
+  available_runs?: WebDiscoveryQueryRun[];
 }
 
 export const getWebDiscoveryQueryResults = (queryId: string, runId?: string) => {
