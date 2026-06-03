@@ -4,6 +4,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Compass,
+  Globe2,
   FolderSearch2,
   LayoutDashboard,
   Radio,
@@ -30,6 +31,7 @@ interface NavItem {
 const PRIMARY: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/discover", label: "Today", icon: Compass },
+  { to: "/discover-web", label: "Web Discovery", icon: Globe2 },
   { to: "/discovery-clusters", label: "Discovery Clusters", icon: FolderSearch2 },
   { to: "/companies", label: "Companies", icon: Building2 },
 ];

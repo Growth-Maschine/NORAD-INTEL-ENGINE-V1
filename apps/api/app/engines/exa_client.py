@@ -90,6 +90,7 @@ class ExaClient:
         category: str | None = None,
         search_type: str = "auto",
         deep_model: str | None = None,
+        contents: dict[str, Any] | None = None,
     ) -> tuple[list[ExaSearchResult], ExaCallStats]:
         """Run an Exa search. Returns (results, stats).
 
@@ -114,6 +115,8 @@ class ExaClient:
             kwargs["end_published_date"] = _isoformat(end_published_date)
         if category:
             kwargs["category"] = category
+        if contents:
+            kwargs["contents"] = contents
 
         t0 = time.perf_counter()
         try:
@@ -262,14 +265,108 @@ def _ms_since(t0: float) -> float:
     return round((time.perf_counter() - t0) * 1000, 1)
 
 
+def _exa_item_dict(item: Any) -> dict[str, Any]:
+    if isinstance(item, dict):
+        return item
+    dump = getattr(item, "model_dump", None)
+    if callable(dump):
+        return dump()
+    return {
+        k: getattr(item, k)
+        for k in (
+            "url",
+            "id",
+            "title",
+            "text",
+            "snippet",
+            "published_date",
+            "score",
+            "highlights",
+            "summary",
+            "image",
+            "favicon",
+            "author",
+        )
+        if hasattr(item, k)
+    }
+
+
+def coerce_exa_highlights(value: Any) -> list[str] | None:
+    """Normalize Exa highlight shapes (string, list, or nested dict) to plain strings."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else None
+    if isinstance(value, list):
+        out: list[str] = []
+        for entry in value:
+            if isinstance(entry, str) and entry.strip():
+                out.append(entry.strip())
+            elif isinstance(entry, dict):
+                for key in ("text", "snippet", "highlight", "content", "sentence"):
+                    chunk = entry.get(key)
+                    if chunk and str(chunk).strip():
+                        out.append(str(chunk).strip())
+                        break
+        return out or None
+    if isinstance(value, dict):
+        for key in ("highlights", "snippets", "items", "sentences"):
+            if key in value:
+                return coerce_exa_highlights(value[key])
+    return None
+
+
 def _to_search_result(item: Any) -> ExaSearchResult:
+    raw = _exa_item_dict(item)
+    snippet = raw.get("text") or raw.get("snippet")
+    if isinstance(snippet, list):
+        snippet = "\n".join(str(x) for x in snippet if x)
+    highlights = coerce_exa_highlights(raw.get("highlights"))
+    if highlights:
+        raw["highlights"] = highlights
+    summary = raw.get("summary")
+    if summary is not None and not isinstance(summary, str):
+        raw["summary"] = str(summary)
     return ExaSearchResult(
-        url=getattr(item, "url", ""),
-        title=getattr(item, "title", None),
-        snippet=getattr(item, "text", None) or getattr(item, "snippet", None),
-        published_date=getattr(item, "published_date", None),
-        score=getattr(item, "score", None),
+        url=str(raw.get("url") or raw.get("id") or ""),
+        title=raw.get("title"),
+        snippet=str(snippet) if snippet else None,
+        published_date=raw.get("published_date"),
+        score=raw.get("score"),
+        raw=raw,
     )
+
+
+def serialize_exa_search_result(r: ExaSearchResult) -> dict[str, Any]:
+    """JSON-safe shape for run.engine_outputs and API responses."""
+    raw = dict(r.raw or {})
+    highlights = coerce_exa_highlights(raw.get("highlights"))
+    text = raw.get("text")
+    if isinstance(text, list):
+        text = "\n".join(str(x) for x in text if x)
+    body_text = str(text).strip() if text else None
+    snippet = r.snippet
+    if snippet and body_text and snippet.strip() == body_text:
+        snippet = None
+    summary = raw.get("summary")
+    if summary is not None and not isinstance(summary, str):
+        summary = str(summary)
+    published = raw.get("published_date") or raw.get("publishedDate")
+    return {
+        "url": r.url,
+        "exa_id": raw.get("id"),
+        "title": r.title,
+        "snippet": snippet,
+        "published_date": str(published) if published else None,
+        "score": r.score,
+        "highlights": highlights,
+        "summary": summary if isinstance(summary, str) else None,
+        "text": body_text,
+        "image": raw.get("image") or raw.get("image_url"),
+        "favicon": raw.get("favicon"),
+        "author": raw.get("author"),
+    }
 
 
 def _to_content(item: Any) -> ExaContent:

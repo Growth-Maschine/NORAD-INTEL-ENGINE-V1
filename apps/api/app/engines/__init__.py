@@ -38,7 +38,6 @@ from app.engines.parallel_client import (
     ParallelTaskResponse,
     get_parallel_client,
 )
-
 __all__ = [
     "ClaudeClient",
     "ClaudeMessage",

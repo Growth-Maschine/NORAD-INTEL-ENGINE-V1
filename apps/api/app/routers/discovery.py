@@ -51,6 +51,9 @@ def _require_admin_in_prod(x_admin_token: str | None) -> None:
 
 class DiscoveryRunRequest(BaseModel):
     cluster_id: uuid.UUID = Field(..., description="Discovery cluster id")
+    restrict_to_trendhunter_domain: bool = Field(
+        default=True, description="When true, Exa search is limited to trendhunter.com"
+    )
     date_from: date | None = None
     date_to: date | None = None
     max_articles: int = Field(15, ge=1, le=30)
@@ -61,6 +64,7 @@ class DiscoveryRunCreated(BaseModel):
     status: str
     cluster_id: uuid.UUID
     cluster_name: str
+    restrict_to_trendhunter_domain: bool
     sse_url: str
     poll_url: str
 
@@ -368,6 +372,7 @@ async def create_discovery_run(
             "cluster_name": cluster.name,
             "cluster_keywords": keywords,
             "query": query,
+            "restrict_to_trendhunter_domain": body.restrict_to_trendhunter_domain,
             "date_from": body.date_from.isoformat() if body.date_from else None,
             "date_to": body.date_to.isoformat() if body.date_to else None,
             "max_articles": body.max_articles,
@@ -382,6 +387,7 @@ async def create_discovery_run(
         cluster_name=cluster.name,
         cluster_keywords=keywords,
         search_query=query,
+        restrict_to_trendhunter_domain=body.restrict_to_trendhunter_domain,
         date_from=body.date_from,
         date_to=body.date_to,
         max_articles=body.max_articles,
@@ -394,6 +400,7 @@ async def create_discovery_run(
         status="queued",
         cluster_id=cluster.id,
         cluster_name=cluster.name,
+        restrict_to_trendhunter_domain=body.restrict_to_trendhunter_domain,
         sse_url=f"/api/events/runs/{run.id}",
         poll_url=f"/api/discovery/runs/{run.id}",
     )

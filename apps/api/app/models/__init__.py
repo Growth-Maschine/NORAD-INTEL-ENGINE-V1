@@ -25,6 +25,8 @@ from app.models.run_event import RunEvent
 from app.models.signal import Signal
 from app.models.source import Source
 from app.models.trend_article import TrendArticle
+from app.models.web_discovery_cluster import WebDiscoveryCluster
+from app.models.web_discovery_query import WebDiscoveryQuery
 
 __all__ = [
     "AppKV",
@@ -37,4 +39,6 @@ __all__ = [
     "Signal",
     "Source",
     "TrendArticle",
+    "WebDiscoveryCluster",
+    "WebDiscoveryQuery",
 ]

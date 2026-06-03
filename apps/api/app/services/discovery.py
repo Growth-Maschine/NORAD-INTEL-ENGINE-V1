@@ -113,9 +113,19 @@ class DiscoveryParams:
     cluster_name: str | None = None
     cluster_keywords: list[str] = field(default_factory=list)
     search_query: str | None = None
+    restrict_to_trendhunter_domain: bool = True
     date_from: date | None = None
     date_to: date | None = None
     max_articles: int = TOP_N_TO_READ
+
+
+@dataclass(slots=True)
+class _Stage1Candidate:
+    url: str
+    title: str | None
+    snippet: str | None
+    published_date: str | None
+    source: str
 
 
 # ── Tool schemas ────────────────────────────────────────────────────────────
@@ -235,8 +245,15 @@ async def execute_discovery(
 
     await emit(
         run_id, "run_started",
-        f"Discovery run started: category={params.category!r} keyword={params.keyword!r}",
-        meta={"category": params.category, "keyword": params.keyword},
+        (
+            f"Discovery run started: category={params.category!r} "
+            f"restrict_to_trendhunter_domain={params.restrict_to_trendhunter_domain}"
+        ),
+        meta={
+            "category": params.category,
+            "keyword": params.keyword,
+            "restrict_to_trendhunter_domain": params.restrict_to_trendhunter_domain,
+        },
     )
 
     try:
@@ -311,59 +328,87 @@ async def execute_discovery(
 # ── Stages ──────────────────────────────────────────────────────────────────
 
 
-async def _stage1_search(run_id: uuid.UUID, p: DiscoveryParams) -> tuple[list, float]:
-    """Exa search restricted to trendhunter.com."""
-    # Query precedence:
-    # 1) explicit search_query from cluster planner
-    # 2) legacy keyword
-    # 3) fallback to category string
-    query = (p.search_query or p.keyword or f"trending {p.category}").strip()
-    await emit(run_id, "stage_started", f"Stage 1 — Exa search: {query!r}",
-               meta={"stage": 1, "query": query})
+async def _stage1_search(run_id: uuid.UUID, p: DiscoveryParams) -> tuple[list[_Stage1Candidate], float]:
+    """Stage 1 candidate fetch from Exa.
 
+    Mode:
+      - `restrict_to_trendhunter_domain=True`  -> include_domains=["trendhunter.com"]
+      - `False` -> unrestricted web search (used by Web Discovery page)
+    """
+    query = (p.search_query or p.keyword or f"trending {p.category}").strip()
+    include_domains = ["trendhunter.com"] if p.restrict_to_trendhunter_domain else None
+    source_name = "trendhunter" if p.restrict_to_trendhunter_domain else "exa_web"
+    await emit(
+        run_id,
+        "stage_started",
+        f"Stage 1 — Exa search ({source_name}): {query!r}",
+        meta={
+            "stage": 1,
+            "query": query,
+            "source": source_name,
+            "include_domains": include_domains or [],
+        },
+    )
+
+    factory = get_session_factory()
     exa = get_exa_client()
     results, stats = await exa.search(
         query,
-        include_domains=["trendhunter.com"],
+        include_domains=include_domains,
         start_published_date=p.date_from,
         end_published_date=p.date_to,
         num_results=MAX_CANDIDATES,
     )
-
-    factory = get_session_factory()
     async with factory() as s:
-        await log_exa_call(s, stats, run_id=run_id, meta={"stage": 1, "query": query})
-
+        await log_exa_call(
+            s,
+            stats,
+            run_id=run_id,
+            meta={"stage": 1, "source": source_name, "query": query},
+        )
     if stats.status != "ok":
         raise RuntimeError(f"Exa search failed: {stats.error}")
 
-    # Topic exclusion filter — drop anything matching EXCLUDED_TOPIC_KEYWORDS
-    # before it can hit the DB / ranker / synthesizer.
-    kept: list = []
+    deduped: list[_Stage1Candidate] = [
+        _Stage1Candidate(
+            url=c.url,
+            title=c.title,
+            snippet=c.snippet,
+            published_date=c.published_date,
+            source=source_name,
+        )
+        for c in results
+    ]
+
+    kept: list[_Stage1Candidate] = []
     dropped: list[dict[str, str]] = []
-    for c in results:
-        if _is_excluded_topic(getattr(c, "title", None), getattr(c, "snippet", None)):
-            dropped.append({"url": getattr(c, "url", ""), "title": getattr(c, "title", "") or ""})
+    for c in deduped:
+        if _is_excluded_topic(c.title, c.snippet):
+            dropped.append({"url": c.url, "title": c.title or ""})
             continue
         kept.append(c)
+
     if dropped:
         await emit(
-            run_id, "topic_filter_applied",
+            run_id,
+            "topic_filter_applied",
             f"Stage 1 — dropped {len(dropped)} excluded-topic candidates "
             f"(keywords: {', '.join(EXCLUDED_TOPIC_KEYWORDS)})",
             meta={"stage": 1, "dropped_count": len(dropped), "dropped": dropped[:20]},
         )
 
     await emit(
-        run_id, "stage_completed",
-        f"Stage 1 — kept {len(kept)} of {len(results)} candidates "
+        run_id,
+        "stage_completed",
+        f"Stage 1 — kept {len(kept)} of {len(deduped)} candidates "
         f"({len(dropped)} excluded) (${stats.cost_usd:.4f})",
         meta={
             "stage": 1,
             "count": len(kept),
-            "raw_count": len(results),
+            "raw_count": len(deduped),
             "excluded_count": len(dropped),
             "cost_usd": stats.cost_usd,
+            "source_counts": {source_name: len(deduped)},
         },
     )
     return kept, stats.cost_usd
@@ -372,7 +417,7 @@ async def _stage1_search(run_id: uuid.UUID, p: DiscoveryParams) -> tuple[list, f
 async def _stage2_dedup_insert(
     run_id: uuid.UUID,
     p: DiscoveryParams,
-    candidates: list,
+    candidates: list[_Stage1Candidate],
     factory: async_sessionmaker[AsyncSession],
 ) -> list[TrendArticle]:
     """Insert candidates with ON CONFLICT DO NOTHING on `url`, then fetch the
@@ -388,7 +433,7 @@ async def _stage2_dedup_insert(
     rows = [
         {
             "url": c.url,
-            "source": "trendhunter",
+            "source": c.source,
             "category": p.category,
             "title": c.title,
             "dek": c.snippet,
@@ -466,7 +511,7 @@ async def _stage3_rank(
 
     user_msg = (
         cluster_ctx +
-        "Rank these TrendHunter articles by BD/intel relevance. High scores "
+        "Rank these candidate discovery articles by BD/intel relevance. High scores "
         "(80+) go to articles that name a specific company, product launch, "
         "funding, or actionable market signal. Score listicles low (≤30).\n\n"
         "HARD EXCLUSIONS — score 0 (zero) regardless of other merit if the "
@@ -533,7 +578,6 @@ async def _stage3_rank(
             meta={"article_id": str(a.id), "score": score},
         )
     return kept, resp.cost_usd
-
 
 async def _stage4_read(
     run_id: uuid.UUID,

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarRange, Compass, Loader2, Play } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { ArticleCardSkeleton } from "@/components/discover/ArticleCardSkeleton";
@@ -101,6 +101,8 @@ function rangeFromDays(days: number): { from: string; to: string } {
 
 export default function Discover() {
   const [selectedClusterId, setSelectedClusterId] = useState<string>("");
+  const location = useLocation();
+  const isWebDiscovery = location.pathname === "/discover-web";
   const initial = RANGE_PRESETS[2];
   const [dateFrom, setDateFrom] = useState<string>(initial.from);
   const [dateTo, setDateTo] = useState<string>(initial.to);
@@ -253,6 +255,7 @@ export default function Discover() {
     mutationFn: () =>
       startDiscoveryRun({
         cluster_id: selectedClusterId,
+        restrict_to_trendhunter_domain: !isWebDiscovery,
         date_from: dateFrom || null,
         date_to: dateTo || null,
         max_articles: 10,
@@ -264,7 +267,9 @@ export default function Discover() {
       setExpandedRuns({ [r.run_id]: true });
       qc.invalidateQueries({ queryKey: ["discovery-runs"] });
       toast.message("Discovery run started", {
-        description: `Cluster: ${r.cluster_name}`,
+        description: `Cluster: ${r.cluster_name} · ${
+          r.restrict_to_trendhunter_domain ? "TrendHunter mode" : "Web mode"
+        }`,
       });
     },
     onError: (err) => {
@@ -388,8 +393,12 @@ export default function Discover() {
   return (
     <>
       <Topbar
-        title="Today"
-        subtitle="Fresh signal, ranked and ready to research."
+        title={isWebDiscovery ? "Web Discovery" : "Today"}
+        subtitle={
+          isWebDiscovery
+            ? "Cluster-driven discovery using Exa web search (no domain restriction)."
+            : "Fresh signal, ranked and ready to research."
+        }
       />
       <PageBody>
         {/* Control bar */}
@@ -425,6 +434,11 @@ export default function Discover() {
               </span>
             </HoverTip>
           </div>
+          {isWebDiscovery && (
+            <div className="mt-3 rounded-lg border border-border bg-tint/20 px-3 py-2 text-[12px] text-muted">
+              Web mode enabled: Exa runs without `trendhunter.com` domain restriction.
+            </div>
+          )}
 
           {/* Date range — quick presets on top, custom picker below. */}
           <div className="mt-5 border-t border-border pt-5">
@@ -617,3 +631,4 @@ function EmptyState({
     </div>
   );
 }
+

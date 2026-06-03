@@ -74,3 +74,5 @@ def diffbot_cost_usd(operation: str, units: int = 1) -> float:
     adds per-call billing later we just bump this map.
     """
     return DIFFBOT_PRICING_USD.get(operation, 0.0) * units
+
+

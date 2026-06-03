@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import get_settings
 from app.core.db import get_session_factory
 from app.core.orphan_sweeper import sweep_orphan_runs
-from app.routers import brands, discovery, engines, events, health, research, schemas
+from app.routers import brands, discovery, engines, events, health, research, schemas, web_discovery
 from app.routers import settings as settings_router
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,7 @@ def create_app() -> FastAPI:
     app.include_router(brands.router)
     app.include_router(schemas.router)
     app.include_router(discovery.router)
+    app.include_router(web_discovery.router)
     app.include_router(research.router)
     app.include_router(settings_router.router)
 

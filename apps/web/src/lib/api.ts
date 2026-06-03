@@ -109,6 +109,7 @@ export interface CategoryGroups {
 
 export interface DiscoveryRunRequest {
   cluster_id: string;
+  restrict_to_trendhunter_domain?: boolean;
   date_from?: string | null;
   date_to?: string | null;
   max_articles?: number;
@@ -119,6 +120,7 @@ export interface DiscoveryRunCreated {
   status: string;
   cluster_id: string;
   cluster_name: string;
+  restrict_to_trendhunter_domain: boolean;
   sse_url: string;
   poll_url: string;
 }
@@ -260,6 +262,234 @@ export const dismissArticle = (id: string) =>
 
 export const recentRunEvents = (runId: string, limit = 50) =>
   api<RunEvent[]>(`/api/events/runs/${runId}/recent?limit=${limit}`);
+
+// ── Web Discovery types + endpoints ──────────────────────────────────────────
+
+export type WebDiscoveryClusterPriority =
+  | "P1 Critical"
+  | "P2 Daily Intelligence"
+  | "P3 Weekly Monitoring";
+
+export interface WebDiscoveryCluster {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  priority: WebDiscoveryClusterPriority;
+  is_active: boolean;
+  include_keywords: string[];
+  exclude_keywords: string[];
+  geography_focus: string[];
+  source_preferences: string[];
+  signal_priorities: string[];
+  query_count: number;
+  signal_count: number;
+  last_run_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WebDiscoveryClusterInput {
+  name: string;
+  description?: string | null;
+  priority?: WebDiscoveryClusterPriority;
+  is_active?: boolean;
+  include_keywords?: string[];
+  exclude_keywords?: string[];
+  geography_focus?: string[];
+  source_preferences?: string[];
+  signal_priorities?: string[];
+}
+
+export interface WebDiscoveryQuery {
+  id: string;
+  cluster_id: string;
+  label: string;
+  search_query: string;
+  search_type: "auto" | "fast" | "deep" | "deep-lite" | "deep-reasoning" | "instant";
+  num_results: number;
+  content_highlights: boolean;
+  content_text: boolean;
+  content_summary: boolean;
+  structured_outputs: boolean;
+  highlights_max_chars: number | null;
+  highlights_guiding_query: string | null;
+  text_max_chars: number | null;
+  text_main_content_only: boolean;
+  summary_max_chars: number | null;
+  system_prompt: string | null;
+  output_schema: Record<string, unknown> | null;
+  livecrawl_timeout_ms: number;
+  max_age_hours: number | null;
+  subpages: number;
+  extra_links: number;
+  extra_image_links: number;
+  subpage_target_keywords: string[];
+  category: string | null;
+  user_location: string | null;
+  include_domains: string[];
+  exclude_domains: string[];
+  published_after: string | null;
+  published_before: string | null;
+  crawled_after: string | null;
+  crawled_before: string | null;
+  content_moderation: boolean;
+  stream_response: boolean;
+  additional_queries: string[];
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WebDiscoveryQueryInput {
+  label: string;
+  search_query: string;
+  search_type?: WebDiscoveryQuery["search_type"];
+  num_results?: number;
+  content_highlights?: boolean;
+  content_text?: boolean;
+  content_summary?: boolean;
+  structured_outputs?: boolean;
+  highlights_max_chars?: number | null;
+  highlights_guiding_query?: string | null;
+  text_max_chars?: number | null;
+  text_main_content_only?: boolean;
+  summary_max_chars?: number | null;
+  system_prompt?: string | null;
+  output_schema?: Record<string, unknown> | null;
+  livecrawl_timeout_ms?: number;
+  max_age_hours?: number | null;
+  subpages?: number;
+  extra_links?: number;
+  extra_image_links?: number;
+  subpage_target_keywords?: string[];
+  category?: string | null;
+  user_location?: string | null;
+  include_domains?: string[];
+  exclude_domains?: string[];
+  published_after?: string | null;
+  published_before?: string | null;
+  crawled_after?: string | null;
+  crawled_before?: string | null;
+  content_moderation?: boolean;
+  stream_response?: boolean;
+  additional_queries?: string[];
+  is_active?: boolean;
+}
+
+export interface WebDiscoveryRun {
+  id: string;
+  status: string;
+  progress_pct: number;
+  source_kind: string;
+  query: string;
+  engines: Record<string, unknown>;
+  engine_outputs: Record<string, unknown>;
+  started_at: string | null;
+  completed_at: string | null;
+  error: string | null;
+  created_at: string;
+}
+
+export interface WebDiscoveryRunCreated {
+  run_id: string;
+  status: string;
+  cluster_id: string;
+  cluster_name: string;
+  query_count: number;
+  sse_url: string;
+  poll_url: string;
+}
+
+export const listWebDiscoveryClusters = () =>
+  api<{ clusters: WebDiscoveryCluster[] }>("/api/web-discovery/clusters");
+
+export const createWebDiscoveryCluster = (body: WebDiscoveryClusterInput) =>
+  api<WebDiscoveryCluster>("/api/web-discovery/clusters", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const getWebDiscoveryCluster = (id: string) =>
+  api<WebDiscoveryCluster>(`/api/web-discovery/clusters/${id}`);
+
+export const updateWebDiscoveryCluster = (id: string, body: WebDiscoveryClusterInput) =>
+  api<WebDiscoveryCluster>(`/api/web-discovery/clusters/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+
+export const deleteWebDiscoveryCluster = (id: string) =>
+  api<{ ok: boolean }>(`/api/web-discovery/clusters/${id}`, { method: "DELETE" });
+
+export const listWebDiscoveryQueries = (clusterId: string) =>
+  api<WebDiscoveryQuery[]>(`/api/web-discovery/clusters/${clusterId}/queries`);
+
+export const createWebDiscoveryQuery = (clusterId: string, body: WebDiscoveryQueryInput) =>
+  api<WebDiscoveryQuery>(`/api/web-discovery/clusters/${clusterId}/queries`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const getWebDiscoveryQuery = (queryId: string) =>
+  api<WebDiscoveryQuery>(`/api/web-discovery/queries/${queryId}`);
+
+export const updateWebDiscoveryQuery = (queryId: string, body: WebDiscoveryQueryInput) =>
+  api<WebDiscoveryQuery>(`/api/web-discovery/queries/${queryId}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+
+export const startWebDiscoveryClusterRun = (clusterId: string, queryId?: string) =>
+  api<WebDiscoveryRunCreated>(`/api/web-discovery/clusters/${clusterId}/runs`, {
+    method: "POST",
+    body: JSON.stringify(queryId ? { query_id: queryId } : {}),
+  });
+
+export const listWebDiscoveryClusterRuns = (clusterId: string, limit = 20) =>
+  api<WebDiscoveryRun[]>(`/api/web-discovery/clusters/${clusterId}/runs?limit=${limit}`);
+
+export const getWebDiscoveryRun = (runId: string) =>
+  api<WebDiscoveryRun>(`/api/web-discovery/runs/${runId}`);
+
+export interface WebDiscoveryResultItem {
+  url: string;
+  exa_id?: string | null;
+  title: string | null;
+  snippet: string | null;
+  published_date: string | null;
+  score: number | null;
+  highlights: string[] | null;
+  summary: string | null;
+  text: string | null;
+  image: string | null;
+  favicon: string | null;
+  author: string | null;
+}
+
+export interface WebDiscoveryQueryResultsPayload {
+  query_id: string;
+  run_id: string;
+  status: string;
+  result_count: number;
+  latency_ms: number | null;
+  cost_usd: number;
+  error: string | null;
+  completed_at: string | null;
+  query_label?: string | null;
+  search_query?: string | null;
+  search_type?: string | null;
+  num_results?: number | null;
+  content_modes?: string[];
+  results: WebDiscoveryResultItem[];
+}
+
+export const getWebDiscoveryQueryResults = (queryId: string, runId?: string) => {
+  const qs = runId ? `?run_id=${encodeURIComponent(runId)}` : "";
+  return api<WebDiscoveryQueryResultsPayload>(
+    `/api/web-discovery/queries/${queryId}/results${qs}`,
+  );
+};
 
 // ── Research types + endpoints ───────────────────────────────────────────────
 
