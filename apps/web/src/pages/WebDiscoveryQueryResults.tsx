@@ -1,4 +1,4 @@
-import { useMemo, useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
 import {
   ArrowLeft,
   Calendar,
@@ -32,7 +32,6 @@ import {
 import { cn } from "@/lib/utils";
 
 type SortKey = "rank" | "score" | "date";
-type ContentSection = "summary" | "excerpts" | "page";
 
 export default function WebDiscoveryQueryResults() {
   const { clusterId = "", queryId = "" } = useParams();
@@ -43,7 +42,6 @@ export default function WebDiscoveryQueryResults() {
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<SortKey>("rank");
   const [expandAll, setExpandAll] = useState(false);
-  const [openSections, setOpenSections] = useState<Record<string, ContentSection[]>>({});
   const [confirmRunAgain, setConfirmRunAgain] = useState(false);
 
   const clusterQuery = useQuery({
@@ -107,31 +105,6 @@ export default function WebDiscoveryQueryResults() {
   const contentModes = payload?.content_modes ?? [];
   const statusTone =
     payload?.status === "ok" || payload?.status === "completed" ? "success" : "error";
-
-  const toggleSection = (url: string, section: ContentSection) => {
-    setOpenSections((prev) => {
-      const current =
-        prev[url] ??
-        defaultSectionsForItem(processedResults.find((r) => r.url === url));
-      const has = current.includes(section);
-      const next = has ? current.filter((s) => s !== section) : [...current, section];
-      return { ...prev, [url]: next };
-    });
-  };
-
-  const sectionsFor = (item: WebDiscoveryResultItem) => {
-    if (expandAll) {
-      const all: ContentSection[] = [];
-      if (item.summary) all.push("summary");
-      if (curateInsights(item).featured.length > 0) all.push("excerpts");
-      if (item.text || item.snippet) all.push("page");
-      return all.length > 0 ? all : (["excerpts"] as ContentSection[]);
-    }
-    return (
-      openSections[item.url] ??
-      defaultSectionsForItem(item)
-    );
-  };
 
   return (
     <>
@@ -288,8 +261,7 @@ export default function WebDiscoveryQueryResults() {
                     key={`${item.url}-${index}`}
                     item={item}
                     rank={sort === "rank" ? index + 1 : undefined}
-                    openSections={sectionsFor(item)}
-                    onToggleSection={(section) => toggleSection(item.url, section)}
+                    expandPage={expandAll}
                   />
                 ))}
               </div>
@@ -306,8 +278,8 @@ export default function WebDiscoveryQueryResults() {
                   abstract when enabled.
                 </li>
                 <li>
-                  <span className="font-medium text-ink">Insights</span> — curated,
-                  query-relevant passages (UI noise filtered out).
+                  <span className="font-medium text-ink">Brief</span> — Exa summary plus
+                  a few supporting quotes (not raw page scrapes).
                 </li>
                 <li>
                   <span className="font-medium text-ink">Page</span> — crawled body text
@@ -343,26 +315,27 @@ export default function WebDiscoveryQueryResults() {
 function SourceCard({
   item,
   rank,
-  openSections,
-  onToggleSection,
+  expandPage = false,
 }: {
   item: WebDiscoveryResultItem;
   rank?: number;
-  openSections: ContentSection[];
-  onToggleSection: (section: ContentSection) => void;
+  expandPage?: boolean;
 }) {
   const host = hostFromUrl(item.url);
   const published = formatDate(item.published_date);
-  const insights = useMemo(() => curateInsights(item), [item]);
-  const [showAllInsights, setShowAllInsights] = useState(false);
-  const visibleInsights = showAllInsights
-    ? [...insights.featured, ...insights.overflow]
-    : insights.featured;
-  const hasSummary = Boolean(item.summary?.trim());
-  const hasExcerpts = insights.featured.length > 0;
-  const hasPage = Boolean(item.text?.trim() || item.snippet?.trim());
+  const presentation = useMemo(() => buildSourcePresentation(item), [item]);
+  const [pageOpen, setPageOpen] = useState(expandPage);
+
+  useEffect(() => {
+    setPageOpen(expandPage);
+  }, [expandPage]);
   const scorePct =
     item.score != null ? Math.min(100, Math.max(0, Math.round(item.score * 100))) : null;
+
+  const hasBrief = presentation.briefParagraphs.length > 0;
+  const hasQuotes = presentation.quotes.length > 0;
+  const hasFaq = presentation.faqPairs.length > 0;
+  const hasPage = presentation.pageParagraphs.length > 0;
 
   return (
     <article className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft transition hover:border-accent/25">
@@ -422,96 +395,108 @@ function SourceCard({
               ) : null}
             </div>
 
-            <div className="mt-4 flex flex-wrap gap-2 border-b border-border/80 pb-3">
-              {hasSummary ? (
-                <SectionTab
-                  active={openSections.includes("summary")}
-                  onClick={() => onToggleSection("summary")}
-                  icon={Sparkles}
-                  label="Summary"
-                />
-              ) : null}
-              {hasExcerpts ? (
-                <SectionTab
-                  active={openSections.includes("excerpts")}
-                  onClick={() => onToggleSection("excerpts")}
-                  icon={Highlighter}
-                  label={`Insights (${insights.featured.length})`}
-                />
-              ) : null}
-              {hasPage ? (
-                <SectionTab
-                  active={openSections.includes("page")}
-                  onClick={() => onToggleSection("page")}
-                  icon={FileText}
-                  label="Page"
-                />
-              ) : null}
-            </div>
-
-            {openSections.includes("summary") && hasSummary ? (
-              <div className="mt-4 rounded-xl border border-[#D4E8D0] bg-gradient-to-b from-[#F3FBF5] to-white px-4 py-3.5">
-                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#3D7A4E]">
-                  Exa summary
-                </p>
-                <p className="mt-2 text-sm leading-[1.65] text-ink">{item.summary}</p>
+            {!hasBrief && !hasQuotes && !hasFaq ? (
+              <div className="mt-4 rounded-lg border border-amber-200/80 bg-amber-50/60 px-3 py-2.5 text-xs text-amber-900">
+                Limited structured content from Exa for this URL. Enable{" "}
+                <span className="font-semibold">Summary</span> on the query for an AI brief,
+                or open the source directly.
               </div>
             ) : null}
 
-            {openSections.includes("excerpts") && hasExcerpts ? (
-              <div className="mt-4">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-soft">
-                    Key insights
-                  </p>
-                  {insights.rawCount > insights.featured.length ? (
-                    <p className="text-[11px] text-soft">
-                      Top {insights.featured.length} of {insights.rawCount} passages
-                    </p>
-                  ) : null}
+            {hasBrief ? (
+              <section className="mt-5 rounded-2xl border border-[#D4E8D0]/80 bg-gradient-to-b from-[#F6FBF7] to-white px-4 py-4 sm:px-5">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-[#3D7A4E]" />
+                  <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#3D7A4E]">
+                    Intelligence brief
+                  </h3>
                 </div>
-                <ul className="mt-3 space-y-3">
-                  {visibleInsights.map((excerpt, i) => (
-                    <li
-                      key={`${i}-${excerpt.slice(0, 24)}`}
-                      className="relative rounded-xl border border-[#E8E4DC]/90 bg-gradient-to-r from-[#FFFCF8] to-white py-3.5 pl-5 pr-4 shadow-[inset_3px_0_0_0_rgba(200,120,60,0.55)]"
+                <div className="mt-3 max-w-none space-y-3.5">
+                  {presentation.briefParagraphs.map((paragraph, i) => (
+                    <p
+                      key={i}
+                      className="text-[15px] leading-[1.8] tracking-[0.01em] text-ink"
                     >
-                      <p className="text-sm leading-[1.7] text-ink">
-                        {formatExcerptText(excerpt)}
-                      </p>
-                    </li>
+                      {paragraph}
+                    </p>
                   ))}
-                </ul>
-                {insights.overflow.length > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowAllInsights((v) => !v)}
-                    className="mt-3 text-xs font-medium text-accent hover:underline"
-                  >
-                    {showAllInsights
-                      ? "Show fewer passages"
-                      : `Show ${insights.overflow.length} more passages`}
-                  </button>
-                ) : null}
-              </div>
+                </div>
+              </section>
             ) : null}
 
-            {openSections.includes("page") && hasPage ? (
-              <div className="mt-4">
-                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-soft">
-                  Page content
-                </p>
-                {item.snippet && item.snippet !== item.text ? (
-                  <p className="mt-2 text-sm leading-relaxed text-muted">{item.snippet}</p>
-                ) : null}
-                {item.text ? (
-                  <div className="mt-2 max-h-80 overflow-y-auto rounded-lg border border-border bg-[#FAFAF8] p-3">
-                    <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed text-muted">
-                      {item.text}
-                    </pre>
+            {hasQuotes ? (
+              <section className="mt-5">
+                <div className="mb-3 flex items-center gap-2">
+                  <Highlighter className="h-4 w-4 text-soft" />
+                  <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-soft">
+                    Supporting evidence
+                  </h3>
+                </div>
+                <div className="space-y-4">
+                  {presentation.quotes.map((quote, i) => (
+                    <figure
+                      key={i}
+                      className="rounded-xl border border-[#E8E4DC]/90 bg-[#FDFCFA] px-5 py-4"
+                    >
+                      <blockquote className="border-l-[3px] border-accent/60 pl-4 text-[15px] leading-[1.75] text-ink">
+                        {quote}
+                      </blockquote>
+                    </figure>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {hasFaq ? (
+              <section className="mt-5">
+                <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-soft">
+                  Key Q&amp;A from page
+                </h3>
+                <dl className="mt-3 space-y-3">
+                  {presentation.faqPairs.map((pair, i) => (
+                    <div
+                      key={i}
+                      className="rounded-xl border border-border/80 bg-white px-4 py-3"
+                    >
+                      <dt className="text-sm font-semibold text-ink">{pair.question}</dt>
+                      <dd className="mt-1.5 text-sm leading-relaxed text-muted">
+                        {pair.answer}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            ) : null}
+
+            {hasPage ? (
+              <details
+                className="mt-5 group rounded-xl border border-border/80 bg-[#FAFAF8]"
+                open={pageOpen}
+                onToggle={(e) => setPageOpen((e.target as HTMLDetailsElement).open)}
+              >
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-medium text-ink [&::-webkit-details-marker]:hidden">
+                  <span className="inline-flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-soft" />
+                    Full page text
+                    <span className="text-xs font-normal text-soft">
+                      ({presentation.pageParagraphs.length} paragraphs)
+                    </span>
+                  </span>
+                  <ChevronDown className="h-4 w-4 text-soft transition group-open:rotate-180" />
+                </summary>
+                <div className="max-h-[28rem] overflow-y-auto border-t border-border/60 px-4 py-4 sm:px-5">
+                  <div className="space-y-3.5">
+                    {presentation.pageParagraphs.map((paragraph, i) => (
+                      <p
+                        key={i}
+                        className="text-sm leading-[1.75] text-muted"
+                      >
+                        {paragraph}
+                      </p>
+                    ))}
                   </div>
-                ) : null}
-              </div>
+                </div>
+              </details>
             ) : null}
 
             <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
@@ -617,37 +602,6 @@ function RunIntelPanel({
         Edit query settings
       </Button>
     </div>
-  );
-}
-
-function SectionTab({
-  active,
-  onClick,
-  icon: Icon,
-  label,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: ComponentType<{ className?: string }>;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition",
-        active
-          ? "border-accent/40 bg-accent/10 text-accent"
-          : "border-border bg-white text-muted hover:text-ink",
-      )}
-    >
-      <Icon className="h-3.5 w-3.5" />
-      {label}
-      <ChevronDown
-        className={cn("h-3 w-3 transition", active && "rotate-180")}
-      />
-    </button>
   );
 }
 
@@ -767,58 +721,76 @@ function EmptyState({
   );
 }
 
-function defaultSectionsForItem(item: WebDiscoveryResultItem | undefined): ContentSection[] {
-  if (!item) return ["summary"];
-  const sections: ContentSection[] = [];
-  if (item.summary?.trim()) sections.push("summary");
-  if (curateInsights(item).featured.length > 0) sections.push("excerpts");
-  else if (item.snippet?.trim() || item.text?.trim()) sections.push("page");
-  if (!sections.length) sections.push("summary");
-  return sections;
-}
-
 const NOISE_EXCERPT =
   /^(slide\s*\d+|\d+\s*of\s*\d+|\(\d+[\s,]*reviews?\)|free\s+shipping|add\s+to\s+cart|shop\s+now|skip\s+to|read\s+more|subscribe|sign\s+up|cookie|menu|home|search|cart|checkout|work\s+better\.?|play\s+better\.?|think\s+better\.?|feel\s+better\.?)$/i;
 
-type CuratedInsights = {
-  featured: string[];
-  overflow: string[];
-  rawCount: number;
+const MARKETING_PHRASE =
+  /\b(free shipping|no questions asked|money.?back|try .{0,40} for \d+ days|return it)\b/i;
+
+type SourcePresentation = {
+  briefParagraphs: string[];
+  quotes: string[];
+  faqPairs: Array<{ question: string; answer: string }>;
+  pageParagraphs: string[];
 };
 
-const FEATURED_INSIGHT_LIMIT = 6;
-const OVERFLOW_INSIGHT_LIMIT = 12;
+const MAX_QUOTES = 3;
+const MAX_FAQ = 2;
 
-function curateInsights(item: WebDiscoveryResultItem): CuratedInsights {
-  const titleNorm = normalizeExcerptKey(item.title ?? "");
+function buildSourcePresentation(item: WebDiscoveryResultItem): SourcePresentation {
+  const briefParagraphs = splitIntoParagraphs(item.summary ?? "");
   const candidates = collectExcerptCandidates(item);
-  const filtered = candidates.filter((text) => {
-    const norm = normalizeExcerptKey(text);
-    if (!norm || norm.length < 12) return false;
-    if (NOISE_EXCERPT.test(norm)) return false;
-    if (titleNorm && (norm === titleNorm || norm.includes(titleNorm) && norm.length < titleNorm.length + 20)) {
-      return false;
-    }
-    if (norm.split(/\s+/).length < 4 && !/[★"“]/.test(text)) return false;
-    return true;
-  });
+  const titleNorm = normalizeExcerptKey(item.title ?? "");
+
+  const filtered = candidates
+    .map((text) => polishPassage(text))
+    .filter((text) => {
+      const norm = normalizeExcerptKey(text);
+      if (!norm || norm.length < 20) return false;
+      if (NOISE_EXCERPT.test(norm)) return false;
+      if (MARKETING_PHRASE.test(norm)) return false;
+      if (
+        titleNorm &&
+        (norm === titleNorm ||
+          (norm.includes(titleNorm) && norm.length < titleNorm.length + 24))
+      ) {
+        return false;
+      }
+      return true;
+    });
 
   const unique = dedupeExcerpts(filtered);
   const ranked = unique
     .map((text) => ({ text, score: scoreExcerpt(text) }))
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => b.score - a.score)
+    .map((row) => row.text);
 
-  const featured = ranked
-    .slice(0, FEATURED_INSIGHT_LIMIT)
-    .map((row) => row.text);
-  const overflow = ranked
-    .slice(FEATURED_INSIGHT_LIMIT, FEATURED_INSIGHT_LIMIT + OVERFLOW_INSIGHT_LIMIT)
-    .map((row) => row.text);
+  const { pairs: faqPairs, rest } = extractFaqPairs(ranked);
+  const quotes = rest
+    .filter((text) => isCompleteThought(text))
+    .slice(0, MAX_QUOTES);
+
+  let pageParagraphs = splitIntoParagraphs(
+    item.text?.trim() || (item.snippet?.trim() !== item.summary?.trim() ? item.snippet ?? "" : ""),
+  );
+  if (pageParagraphs.length === 0 && briefParagraphs.length === 0 && quotes.length > 0) {
+    pageParagraphs = [];
+  }
+
+  if (briefParagraphs.length === 0 && quotes.length > 0) {
+    return {
+      briefParagraphs: quotes.slice(0, 1).map((q) => polishPassage(q)),
+      quotes: quotes.slice(1, MAX_QUOTES),
+      faqPairs: faqPairs.slice(0, MAX_FAQ),
+      pageParagraphs,
+    };
+  }
 
   return {
-    featured,
-    overflow,
-    rawCount: candidates.length,
+    briefParagraphs,
+    quotes,
+    faqPairs: faqPairs.slice(0, MAX_FAQ),
+    pageParagraphs,
   };
 }
 
@@ -870,23 +842,97 @@ function dedupeExcerpts(items: string[]): string[] {
 function scoreExcerpt(text: string): number {
   const words = text.split(/\s+/).filter(Boolean).length;
   let score = 0;
-  if (words >= 18) score += 5;
-  else if (words >= 10) score += 3;
-  else if (words >= 6) score += 1;
-  else score -= 4;
+  if (words >= 22) score += 6;
+  else if (words >= 14) score += 4;
+  else if (words >= 10) score += 2;
+  else score -= 5;
 
-  if (text.length >= 90) score += 2;
-  if (/★|review|rating|customer|launch|announced|report|study|ingredient|nicotine|cognitive/i.test(text)) {
-    score += 3;
+  if (text.length >= 120) score += 2;
+  if (/★|review|rating|customer|testimonial|launch|announced|report|study|ingredient|nicotine|cognitive|clinical/i.test(text)) {
+    score += 4;
   }
-  if (/[.!?]["']?\s*$/.test(text.trim())) score += 1;
-  if (NOISE_EXCERPT.test(normalizeExcerptKey(text))) score -= 10;
-  if (words <= 3) score -= 6;
+  if (/[.!?]["']?\s*$/.test(text.trim())) score += 2;
+  if (text.trim().endsWith("?")) score -= 2;
+  if (MARKETING_PHRASE.test(text)) score -= 12;
+  if (NOISE_EXCERPT.test(normalizeExcerptKey(text))) score -= 12;
+  if (words <= 6) score -= 8;
   return score;
 }
 
-function formatExcerptText(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
+function isCompleteThought(text: string): boolean {
+  const t = polishPassage(text);
+  const words = t.split(/\s+/).filter(Boolean).length;
+  if (words < 10) return false;
+  if (MARKETING_PHRASE.test(t)) return false;
+  if (/★/.test(t)) return true;
+  if (t.endsWith("?")) return false;
+  return /[.!?]["']?\s*$/.test(t);
+}
+
+function extractFaqPairs(passages: string[]): {
+  pairs: Array<{ question: string; answer: string }>;
+  rest: string[];
+} {
+  const pairs: Array<{ question: string; answer: string }> = [];
+  const rest: string[] = [];
+  let i = 0;
+  while (i < passages.length) {
+    const cur = passages[i];
+    const next = passages[i + 1];
+    if (
+      cur.trim().endsWith("?") &&
+      next &&
+      !next.trim().endsWith("?") &&
+      isCompleteThought(next) &&
+      next.split(/\s+/).length >= 8
+    ) {
+      pairs.push({
+        question: polishPassage(cur),
+        answer: polishPassage(next),
+      });
+      i += 2;
+    } else {
+      rest.push(cur);
+      i += 1;
+    }
+  }
+  return { pairs, rest };
+}
+
+function splitIntoParagraphs(text: string): string[] {
+  const cleaned = polishPassage(text);
+  if (!cleaned) return [];
+
+  const byBreak = cleaned
+    .split(/\n\n+/)
+    .map((p) => polishPassage(p))
+    .filter((p) => p.length >= 40);
+  if (byBreak.length > 0) return byBreak;
+
+  const sentences = cleaned.match(/[^.!?]+[.!?]+(?:\s|$)/g) ?? [cleaned];
+  const out: string[] = [];
+  let buf = "";
+  for (const sentence of sentences) {
+    const next = buf + sentence;
+    if (next.length > 380) {
+      if (buf.trim()) out.push(polishPassage(buf));
+      buf = sentence;
+    } else {
+      buf = next;
+    }
+  }
+  if (buf.trim()) out.push(polishPassage(buf));
+  return out.length ? out : [cleaned];
+}
+
+function polishPassage(text: string): string {
+  let t = text.replace(/\s+/g, " ").trim();
+  t = t.replace(/^["'“”]+|["'“”]+$/g, "").trim();
+  t = t.replace(/\s+([,.;:!?])/g, "$1");
+  if (t && /^[a-z]/.test(t)) {
+    t = t.charAt(0).toUpperCase() + t.slice(1);
+  }
+  return t;
 }
 
 function hostFromUrl(url: string): string {
