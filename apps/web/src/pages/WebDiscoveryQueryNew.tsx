@@ -159,9 +159,12 @@ export default function WebDiscoveryQueryNew() {
   const isEditMode = !!queryId;
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const activeRunStorageKey = `web_discovery_active_run_${clusterId}`;
+  const activeRunStorageKey = isEditMode
+    ? `web_discovery_active_run_${clusterId}_${queryId}`
+    : "";
   const autoPrefillAppliedRef = useRef(false);
   const redirectedRunRef = useRef<string | null>(null);
+  const [userInitiatedRun, setUserInitiatedRun] = useState(false);
   const [includeDomains, setIncludeDomains] = useState<string[]>([]);
   const [excludeDomains, setExcludeDomains] = useState<string[]>([]);
   const [additionalQueries, setAdditionalQueries] = useState<string[]>([]);
@@ -212,8 +215,17 @@ export default function WebDiscoveryQueryNew() {
   const clusterRunsQuery = useQuery({
     queryKey: ["web-discovery-runs", clusterId],
     queryFn: () => listWebDiscoveryClusterRuns(clusterId, 20),
-    enabled: !!clusterId,
-    refetchInterval: 5000,
+    enabled: !!clusterId && isEditMode,
+    refetchInterval: (q) => {
+      const rows = q.state.data ?? [];
+      const tracking = activeRunId
+        ? rows.find((r) => r.id === activeRunId)
+        : rows[0];
+      if (!tracking) return false;
+      return ["queued", "researching", "synthesizing"].includes(tracking.status)
+        ? 3000
+        : false;
+    },
   });
 
   const lastQueryRunId = useMemo(() => {
@@ -329,19 +341,20 @@ export default function WebDiscoveryQueryNew() {
   }, [queryDetailQuery.data]);
 
   useEffect(() => {
-    if (!clusterId) return;
+    if (!isEditMode || !activeRunStorageKey) return;
     const stored = localStorage.getItem(activeRunStorageKey);
     if (stored) setActiveRunId(stored);
-  }, [clusterId, activeRunStorageKey]);
+  }, [isEditMode, activeRunStorageKey]);
 
   useEffect(() => {
+    if (!isEditMode || !queryId) return;
     const latest = clusterRunsQuery.data?.[0];
-    if (!latest) return;
-    if (!activeRunId && ["queued", "researching", "synthesizing"].includes(latest.status)) {
-      setActiveRunId(latest.id);
-      localStorage.setItem(activeRunStorageKey, latest.id);
-    }
-  }, [clusterRunsQuery.data, activeRunId, activeRunStorageKey]);
+    if (!latest || activeRunId) return;
+    if (!["queued", "researching", "synthesizing"].includes(latest.status)) return;
+    if (!runIncludesQuery(latest, queryId)) return;
+    setActiveRunId(latest.id);
+    localStorage.setItem(activeRunStorageKey, latest.id);
+  }, [clusterRunsQuery.data, activeRunId, activeRunStorageKey, isEditMode, queryId]);
 
   const goToQueryResults = (run: string) => {
     if (!isEditMode || !queryId || redirectedRunRef.current === run) return;
@@ -416,7 +429,7 @@ export default function WebDiscoveryQueryNew() {
     const status = activeRunQuery.data?.status;
     if (!status) return;
     if (!["queued", "researching", "synthesizing"].includes(status)) {
-      localStorage.removeItem(activeRunStorageKey);
+      if (activeRunStorageKey) localStorage.removeItem(activeRunStorageKey);
     }
   }, [activeRunQuery.data?.status, activeRunStorageKey]);
 
@@ -428,13 +441,55 @@ export default function WebDiscoveryQueryNew() {
     }
   }, [activeRunQuery.data?.status, activeRunId, isEditMode, clusterId, queryId]);
 
+  const buildQueryPayload = (): WebDiscoveryQueryInput => {
+    if (!form.search_query.trim()) {
+      throw new Error("Search query is required");
+    }
+    return {
+      label: form.label.trim() || form.search_query.trim().slice(0, 80),
+      search_query: form.search_query.trim(),
+      search_type: form.search_type,
+      num_results: form.num_results,
+      category: form.category || null,
+      user_location: form.user_location || null,
+      structured_outputs: false,
+      system_prompt: form.system_prompt.trim() || null,
+      output_schema: null,
+      content_highlights: form.content_highlights,
+      highlights_max_chars: form.content_highlights ? form.highlights_max_chars : null,
+      highlights_guiding_query:
+        form.content_highlights && form.highlights_guiding_query.trim()
+          ? form.highlights_guiding_query.trim()
+          : null,
+      content_text: form.content_text,
+      text_max_chars: form.content_text ? form.text_max_chars : null,
+      text_main_content_only: form.text_main_content_only,
+      content_summary: form.content_summary,
+      summary_max_chars: form.content_summary ? form.summary_max_chars : null,
+      max_age_hours: form.max_age_hours,
+      livecrawl_timeout_ms: form.livecrawl_timeout_ms,
+      subpages: 0,
+      extra_links: 0,
+      extra_image_links: 0,
+      content_moderation: form.content_moderation,
+      stream_response: form.stream_response,
+      include_domains: includeDomains,
+      exclude_domains: excludeDomains,
+      published_after: form.published_after || null,
+      published_before: form.published_before || null,
+      crawled_after: form.crawled_after || null,
+      crawled_before: form.crawled_before || null,
+      additional_queries: additionalQueries,
+    };
+  };
+
   const createMut = useMutation({
     mutationFn: (body: WebDiscoveryQueryInput) => createWebDiscoveryQuery(clusterId, body),
     onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ["web-discovery-queries", clusterId] });
       setLastCreatedLabel(created.label);
       toast.success("Query created", {
-        description: "You can start the cluster run here and watch live logs.",
+        description: "Saved to this cluster. Use Run Query when you are ready.",
       });
     },
     onError: (err) => {
@@ -456,9 +511,19 @@ export default function WebDiscoveryQueryNew() {
     },
   });
   const runMut = useMutation({
-    mutationFn: () =>
-      startWebDiscoveryClusterRun(clusterId, isEditMode ? queryId : undefined),
+    mutationFn: async () => {
+      let targetQueryId = queryId;
+      if (!isEditMode) {
+        const created = await createWebDiscoveryQuery(clusterId, buildQueryPayload());
+        targetQueryId = created.id;
+        qc.invalidateQueries({ queryKey: ["web-discovery-queries", clusterId] });
+        setLastCreatedLabel(created.label);
+      }
+      const run = await startWebDiscoveryClusterRun(clusterId, targetQueryId);
+      return { run, targetQueryId };
+    },
     onMutate: () => {
+      setUserInitiatedRun(true);
       setRunLaunching(true);
       const now = new Date().toISOString();
       setFeedEvents([
@@ -474,11 +539,13 @@ export default function WebDiscoveryQueryNew() {
       ]);
       setFeedConnected(false);
     },
-    onSuccess: (created) => {
+    onSuccess: ({ run: created, targetQueryId }) => {
       redirectedRunRef.current = null;
       setRunLaunching(false);
       setActiveRunId(created.run_id);
-      localStorage.setItem(activeRunStorageKey, created.run_id);
+      const runStorageKey = `web_discovery_active_run_${clusterId}_${targetQueryId}`;
+      localStorage.setItem(runStorageKey, created.run_id);
+      localStorage.setItem(`web_discovery_query_has_run_${targetQueryId}`, "1");
       qc.setQueryData(["web-discovery-run", created.run_id], {
         id: created.run_id,
         status: created.status,
@@ -493,22 +560,25 @@ export default function WebDiscoveryQueryNew() {
         created_at: new Date().toISOString(),
       });
       qc.invalidateQueries({ queryKey: ["web-discovery-runs", clusterId] });
-      if (isEditMode && queryId) {
-        qc.invalidateQueries({ queryKey: ["web-discovery-query-runs", queryId] });
-        localStorage.setItem(`web_discovery_query_has_run_${queryId}`, "1");
-      }
+      qc.invalidateQueries({ queryKey: ["web-discovery-query-runs", targetQueryId] });
       recentRunEvents(created.run_id, 120)
         .then((rows) => {
           if (rows.length) setFeedEvents(rows);
         })
         .catch(() => {});
-      toast.success(isEditMode ? "Query run started" : "Cluster run started", {
-        description: isEditMode
-          ? "Live activity below — results open when the run finishes."
-          : "Live activity is streaming in the panel.",
+      if (!isEditMode) {
+        toast.success("Query created and run started", {
+          description: "Opening this query’s workbench — results when the run finishes.",
+        });
+        navigate(`/discover-web/clusters/${clusterId}/queries/${targetQueryId}`);
+        return;
+      }
+      toast.success("Query run started", {
+        description: "Live activity below — results open when the run finishes.",
       });
     },
     onError: (err) => {
+      setUserInitiatedRun(false);
       setRunLaunching(false);
       setFeedEvents([]);
       toast.error("Failed to start run", { description: (err as Error).message });
@@ -531,19 +601,22 @@ export default function WebDiscoveryQueryNew() {
     return out;
   }, [form.content_highlights, form.content_text, form.content_summary]);
 
-  const activeRunLive =
-    runLaunching ||
-    runMut.isPending ||
-    !activeRunQuery.data ||
-    ["queued", "researching", "synthesizing"].includes(activeRunQuery.data.status);
+  const activeRunLive = useMemo(() => {
+    if (runLaunching || runMut.isPending) return true;
+    if (!activeRunId) return false;
+    const row = activeRunQuery.data;
+    if (!row) return true;
+    return ["queued", "researching", "synthesizing"].includes(row.status);
+  }, [runLaunching, runMut.isPending, activeRunId, activeRunQuery.data]);
 
   const realFeedEvents = useMemo(
     () => feedEvents.filter((ev) => !ev.id.startsWith("opt-")),
     [feedEvents],
   );
 
-  const showLivePanel =
-    runLaunching || !!activeRunId || (isEditMode && realFeedEvents.length > 0);
+  const showLivePanel = isEditMode
+    ? runLaunching || !!activeRunId || realFeedEvents.length > 0
+    : runLaunching || runMut.isPending || (userInitiatedRun && !!activeRunId);
 
   const liveStatusLabel = runLaunching || runMut.isPending
     ? "launching"
@@ -580,51 +653,16 @@ export default function WebDiscoveryQueryNew() {
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (!form.search_query.trim()) {
-      toast.error("Search query is required");
-      return;
+    try {
+      const payload = buildQueryPayload();
+      if (isEditMode) {
+        updateMut.mutate(payload);
+        return;
+      }
+      createMut.mutate(payload);
+    } catch (err) {
+      toast.error((err as Error).message);
     }
-    const payload: WebDiscoveryQueryInput = {
-      label: form.label.trim() || form.search_query.trim().slice(0, 80),
-      search_query: form.search_query.trim(),
-      search_type: form.search_type,
-      num_results: form.num_results,
-      category: form.category || null,
-      user_location: form.user_location || null,
-      structured_outputs: false,
-      system_prompt: form.system_prompt.trim() || null,
-      output_schema: null,
-      content_highlights: form.content_highlights,
-      highlights_max_chars: form.content_highlights ? form.highlights_max_chars : null,
-      highlights_guiding_query:
-        form.content_highlights && form.highlights_guiding_query.trim()
-          ? form.highlights_guiding_query.trim()
-          : null,
-      content_text: form.content_text,
-      text_max_chars: form.content_text ? form.text_max_chars : null,
-      text_main_content_only: form.text_main_content_only,
-      content_summary: form.content_summary,
-      summary_max_chars: form.content_summary ? form.summary_max_chars : null,
-      max_age_hours: form.max_age_hours,
-      livecrawl_timeout_ms: form.livecrawl_timeout_ms,
-      subpages: 0,
-      extra_links: 0,
-      extra_image_links: 0,
-      content_moderation: form.content_moderation,
-      stream_response: form.stream_response,
-      include_domains: includeDomains,
-      exclude_domains: excludeDomains,
-      published_after: form.published_after || null,
-      published_before: form.published_before || null,
-      crawled_after: form.crawled_after || null,
-      crawled_before: form.crawled_before || null,
-      additional_queries: additionalQueries,
-    };
-    if (isEditMode) {
-      updateMut.mutate(payload);
-      return;
-    }
-    createMut.mutate(payload);
   };
 
   if (isEditMode && queryDetailQuery.isLoading) {
@@ -1088,7 +1126,7 @@ export default function WebDiscoveryQueryNew() {
                 </p>
                 {!showLivePanel && !isEditMode ? (
                   <p className="mt-1 text-xs text-muted">
-                    Start a cluster run to stream activity here in real time.
+                    Use Create &amp; Run Query to save this query and stream its run here.
                   </p>
                 ) : !showLivePanel ? (
                   <p className="mt-1 text-xs text-muted">
@@ -1229,33 +1267,63 @@ export default function WebDiscoveryQueryNew() {
                   ? "Save Query"
                   : "Create Query"}
             </Button>
-            <Button
-              type="button"
-              className={cn(
-                "w-full",
-                activeRunLive &&
-                  "disabled:!cursor-wait disabled:!bg-accent disabled:!text-white disabled:!opacity-95",
-              )}
-              onClick={() => {
-                if (isEditMode && hasCompletedRun && !activeRunLive) {
-                  setConfirmRunQuery(true);
-                  return;
-                }
-                runMut.mutate();
-              }}
-              disabled={activeRunLive}
-            >
-              <Activity className={cn("h-4 w-4", activeRunLive && "animate-pulse")} />
-              {runMut.isPending || runLaunching
-                ? "Launching…"
-                : activeRunLive && activeRunId
-                  ? "Running…"
-                  : isEditMode
-                    ? hasCompletedRun
+            {isEditMode ? (
+              <Button
+                type="button"
+                className={cn(
+                  "w-full",
+                  activeRunLive &&
+                    "disabled:!cursor-wait disabled:!bg-accent disabled:!text-white disabled:!opacity-95",
+                )}
+                onClick={() => {
+                  if (hasCompletedRun && !activeRunLive) {
+                    setConfirmRunQuery(true);
+                    return;
+                  }
+                  try {
+                    buildQueryPayload();
+                    runMut.mutate();
+                  } catch (err) {
+                    toast.error((err as Error).message);
+                  }
+                }}
+                disabled={activeRunLive || savePending}
+              >
+                <Activity className={cn("h-4 w-4", activeRunLive && "animate-pulse")} />
+                {runMut.isPending || runLaunching
+                  ? "Launching…"
+                  : activeRunLive
+                    ? "Running…"
+                    : hasCompletedRun
                       ? "Run Again"
-                      : "Run Query"
-                    : "Run All Active Queries"}
-            </Button>
+                      : "Run Query"}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                className={cn(
+                  "w-full",
+                  activeRunLive &&
+                    "disabled:!cursor-wait disabled:!bg-accent disabled:!text-white disabled:!opacity-95",
+                )}
+                onClick={() => {
+                  try {
+                    buildQueryPayload();
+                    runMut.mutate();
+                  } catch (err) {
+                    toast.error((err as Error).message);
+                  }
+                }}
+                disabled={activeRunLive || savePending}
+              >
+                <Activity className={cn("h-4 w-4", activeRunLive && "animate-pulse")} />
+                {runMut.isPending || runLaunching
+                  ? "Launching…"
+                  : activeRunLive
+                    ? "Running…"
+                    : "Create & Run Query"}
+              </Button>
+            )}
             {isEditMode ? (
               <Button
                 type="button"
