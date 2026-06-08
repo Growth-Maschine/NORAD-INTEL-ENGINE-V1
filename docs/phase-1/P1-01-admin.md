@@ -7,8 +7,6 @@
 | **Version** | 2.3 |
 | **Status** | Draft |
 | **Last updated** | 2026-06-08 |
-| **Parent document** | [P1-00 Phase 1 Overview](./phase-1-overview.md) |
-| **Companion document** | [P1-01 User](./P1-01-user.md) (pending) |
 
 ---
 
@@ -729,10 +727,8 @@ Changes apply to the **next** research run, not runs already in flight. In produ
 
 | Role | Name | Date | Status |
 |------|------|------|--------|
-| Author | huzaifa | 2026-06-08 | Draft |
-| Reviewer | — | — | Pending |
-
-**Next:** P1-01-User (analyst frontend walkthrough).
+| Author | Huzaifa | 2026-06-08 | Draft |
+| Reviewer | Shehrayar Haq | — | Pending |
 
 ---
 

@@ -8,7 +8,6 @@
 | **Status** | Draft |
 | **Last updated** | 2026-06-08 |
 | **Audience** | Stakeholders, product, and analyst users |
-| **Parent document** | [P1-00 Phase 1 Overview](./phase-1-overview.md) |
 
 ---
 
@@ -866,8 +865,8 @@ flowchart TD
 
 | Role | Name | Date | Status |
 |------|------|------|--------|
-| Author | huzaifa | 2026-06-08 | Draft |
-| Reviewer | — | — | Pending |
+| Author | Huzaifa | 2026-06-08 | Draft |
+| Reviewer | Shehrayar Haq | — | Pending |
 
 ---
 
