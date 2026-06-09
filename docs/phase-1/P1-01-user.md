@@ -181,16 +181,17 @@ Before an article is ready to expand, an **AI analysis step** (Claude LLM) has t
 `News row chevron (click)` → `Read expanded article` → `Review signal score and summary`
 
 ---
-
 ### 2.7 Companies in story
 
-| Component | User action | What the user sees |
-|-----------|-------------|-------------------|
-| **Companies in story** block | Read | Companies mentioned in the article |
-| **PRIMARY** badge | Read | Main subject company |
-| **PARTNER** badge | Read | Secondary or partner company |
-| **Company chevron** | Click | Expands company description blurb |
-| **+ ADD** button | Click | Starts deep research on that company |
+**What the user is trying to do:** Escalate a company spotted in a news signal into deep research for full profiling. This is the primary action the entire News tab exists to support — everything before this step (browsing, expanding, reading scores) is leading here.
+
+| Component | User action | Action type | What the user sees |
+|-----------|-------------|-------------------|-------------------|
+| **Companies in story** block | Read | — | Companies mentioned in the article |
+| **PRIMARY** badge | Read | — | Main subject company |
+| **PARTNER** badge | Read | — | Secondary or partner company |
+| **Company chevron** | Click | Navigate | Expands company description blurb |
+| **+ ADD** button | Click | **Escalate** | Queues company for deep research → sends to Pending review |
 
 **Behind the scenes:**
 
@@ -201,6 +202,18 @@ Clicking **+ ADD** starts the full **Deep Research** pipeline on the NORAD backe
 **Flow:**
 
 `Expanded article` → `Companies in story` → `+ ADD (click)`
+
+---
+
+**Failure states:**
+
+| Condition | What the user sees | What the system does |
+|-----------|-------------------|----------------------|
+| Company already in Pending review | Toast: "Already queued" or button disabled | No duplicate run started |
+| Stage 2 — one engine fails (Parallel, Exa, or Diffbot) | No visible change — research continues | Run proceeds with remaining engines |
+| Stage 2 — all three engines fail | Pending review row shows failed state | Run stops; no profile saved; analyst can retry |
+| Stage 3 — AI synthesis fails (unrecoverable) | Pending review row shows failed state | Run stops; no profile saved |
+| Article has no companies detected | Companies in story block absent or empty | No + ADD button shown |
 
 ---
 
