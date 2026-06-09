@@ -210,7 +210,7 @@ Clicking **+ ADD** starts the full **Deep Research** pipeline on the NORAD backe
 | Condition | What the user sees | What the system does |
 |-----------|-------------------|----------------------|
 | Company already in Pending review | Toast: "Already queued" or button disabled | No duplicate run started |
-| Stage 2 — one engine fails (Parallel, Exa, or Diffbot) | No visible change — research continues | Run proceeds with remaining engines |
+| Stage 2 — one engine fails (Parallel, Exa, or Diffbot) | No visible change  research continues | Run proceeds with remaining engines |
 | Stage 2 — all three engines fail | Pending review row shows failed state | Run stops; no profile saved; analyst can retry |
 | Stage 3 — AI synthesis fails (unrecoverable) | Pending review row shows failed state | Run stops; no profile saved |
 | Article has no companies detected | Companies in story block absent or empty | No + ADD button shown |
