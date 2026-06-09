@@ -372,3 +372,16 @@ flowchart LR
 |------|------|------|--------|
 | Author | Huzaifa | 2026-06-08 | Draft |
 | Reviewer | Shehrayar Haq | — | Pending |
+<<<<<<< HEAD
+=======
+
+---
+
+## 14. Revision history
+
+| Version | Date | Author | Description |
+|---------|------|--------|-------------|
+| 1.0 | 2026-06-08 | huzaifa | Initial object definitions |
+| 1.1 | 2026-06-08 | huzaifa | Stakeholder-only — removed admin/cross-UI references |
+| 1.2 | 2026-06-08 | huzaifa | Introduction rewrite — proper scope and vocabulary |
+>>>>>>> f9aee15 (Phase 01 Issue 2.0 docs)

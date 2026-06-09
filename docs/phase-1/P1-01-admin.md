@@ -4,7 +4,7 @@
 |-------|-------|
 | **Document ref** | P1-01-Admin |
 | **Title** | Core Operator Workflow — Admin Console |
-| **Version** | 2.3 |
+| **Version** | 2.4 |
 | **Status** | Draft |
 | **Last updated** | 2026-06-08 |
 
@@ -23,6 +23,18 @@ The **NORAD Intel Engine Admin Console** (`apps/web`) is where operators configu
 **Supporting admin workflows:** Discovery Clusters (§8) feeds Today; Settings (§9) configures research engines.
 
 Each workflow section uses the same format: component table → flow line → short explanation → complete pipeline diagram at the end.
+
+**Additional fields (v2.4):** Each workflow subsection may also include **What the operator is trying to do**, an **Action type** column in the component table, and a **Failure states** block before the section divider. Summary error tables (§2.11, §3.6, §4.8) are unchanged.
+
+| Block | Purpose |
+|-------|---------|
+| **What the operator is trying to do** | The goal of this step in the operator journey |
+| **UI guide** | Component, action, **action type**, and backend effect |
+| **Flow** | One-line click path |
+| **Failure states** | What the operator sees and what the system does when something goes wrong |
+| **Diagram** | Complete pipeline map *(end of each workflow)* |
+
+**Action types:** `Read` · `Navigate` · `Configure` · `Run` · `Monitor` · `Escalate` · `Cancel` · `Dismiss` · `Filter` · `—`
 
 ### 1.1 Definitions used in this document
 
@@ -58,11 +70,13 @@ Operators define themed search clusters, add Exa queries, run one query or all a
 
 ### 2.2 Create search cluster
 
-| Component | Action | Backend |
-|-----------|--------|---------|
-| **Create Cluster** button | Click on cluster list page | Opens create dialog |
-| **Cluster form** (name, keywords, geography, sources, signal priorities) | Fill and submit | `POST /api/web-discovery/clusters` → `web_discovery_clusters` |
-| Auto-navigation | On success | Routes to cluster command center |
+**What the operator is trying to do:** Define a themed search scope — keywords, geography, sources — before adding queries or running Exa searches.
+
+| Component | Action | Action type | Backend |
+|-----------|--------|-------------|---------|
+| **Create Cluster** button | Click on cluster list page | Navigate | Opens create dialog |
+| **Cluster form** (name, keywords, geography, sources, signal priorities) | Fill and submit | Configure | `POST /api/web-discovery/clusters` → `web_discovery_clusters` |
+| Auto-navigation | On success | Navigate | Routes to cluster command center |
 
 **Flow:**
 
@@ -70,15 +84,26 @@ Operators define themed search clusters, add Exa queries, run one query or all a
 
 The operator names the cluster and sets scope tags (include/exclude keywords, geography, source preferences, signal priorities). On save, the API persists the cluster and opens the command center for that cluster.
 
+**Failure states:**
+
+| Condition | What the operator sees | What the system does |
+|-----------|------------------------|----------------------|
+| Required fields missing | Inline validation; submit blocked | Cluster not saved |
+| Duplicate cluster name | Error toast | `POST` rejected — operator renames |
+
+
+
 ---
 
 ### 2.3 Add search query
 
-| Component | Action | Backend |
-|-----------|--------|---------|
-| **+ Add Query** button | Click on cluster page | Navigates to query editor |
-| **Query form** (label, search text, search type, result count, content modes, filters) | Fill and save | `POST /api/web-discovery/clusters/:id/queries` → `web_discovery_queries` |
-| **Save Query** (edit mode) | Click | `PUT /api/web-discovery/queries/:id` |
+**What the operator is trying to do:** Add one Exa search definition inside the cluster — the unit that actually runs when the operator hits **Run**.
+
+| Component | Action | Action type | Backend |
+|-----------|--------|-------------|---------|
+| **+ Add Query** button | Click on cluster page | Navigate | Navigates to query editor |
+| **Query form** (label, search text, search type, result count, content modes, filters) | Fill and save | Configure | `POST /api/web-discovery/clusters/:id/queries` → `web_discovery_queries` |
+| **Save Query** (edit mode) | Click | Configure | `PUT /api/web-discovery/queries/:id` |
 
 **Flow:**
 
@@ -86,15 +111,26 @@ The operator names the cluster and sets scope tags (include/exclude keywords, ge
 
 Each query is an Exa search definition. The form pre-fills search text from the cluster keywords. LLM fields (`system_prompt`, `output_schema`) can be saved but are **not executed** at run time today.
 
+**Failure states:**
+
+| Condition | What the operator sees | What the system does |
+|-----------|------------------------|----------------------|
+| Empty search text | Validation error | Query not saved |
+| Cluster has no active queries at run time | Toast when running batch later | Run blocked until at least one active query exists |
+
+
+
 ---
 
 ### 2.4 Run query or cluster
 
-| Component | Action | Backend |
-|-----------|--------|---------|
-| **Run All Cluster Queries** | Click → confirm | `POST /api/web-discovery/clusters/:id/runs` with `{}` — runs all active queries sequentially |
-| **Run Query** | Click on query editor | `POST .../runs` with `{ query_id }` — single query only |
-| **Create & Run Query** | Click on new query form | Creates query then starts single-query run |
+**What the operator is trying to do:** Execute Exa searches and produce fresh web results — single query or full cluster batch.
+
+| Component | Action | Action type | Backend |
+|-----------|--------|-------------|---------|
+| **Run All Cluster Queries** | Click → confirm | Run | `POST /api/web-discovery/clusters/:id/runs` with `{}` — runs all active queries sequentially |
+| **Run Query** | Click on query editor | Run | `POST .../runs` with `{ query_id }` — single query only |
+| **Create & Run Query** | Click on new query form | Run | Creates query then starts single-query run |
 
 **Flow (single query):**
 
@@ -110,11 +146,13 @@ Both paths create a `runs` row with `source_kind = web_discovery`. Maximum 5 con
 
 ### 2.5 Monitor the run
 
-| Component | Action | Backend |
-|-----------|--------|---------|
-| **Activity log** (query editor) | Watch inline while running | SSE `run_events` per query |
-| **Results tab** (cluster page) | Switch tab after batch run | Polls cluster runs every 5 s |
-| Progress | — | `runs.status`: `queued` → `researching` → `completed` / `failed` |
+**What the operator is trying to do:** Watch the run complete and confirm Exa returned results before opening the results page.
+
+| Component | Action | Action type | Backend |
+|-----------|--------|-------------|---------|
+| **Activity log** (query editor) | Watch inline while running | Monitor | SSE `run_events` per query |
+| **Results tab** (cluster page) | Switch tab after batch run | Monitor | Polls cluster runs every 5 s |
+| Progress | — | Read | `runs.status`: `queued` → `researching` → `completed` / `failed` |
 
 **Flow:**
 
@@ -122,17 +160,39 @@ Both paths create a `runs` row with `source_kind = web_discovery`. Maximum 5 con
 
 For each active query the backend calls Exa search with the query's content settings, logs to `engine_calls`, and appends results to `runs.engine_outputs`.
 
+**Failure states:**
+
+| Condition | What the operator sees | What the system does |
+|-----------|------------------------|----------------------|
+| Cluster paused | Toast error (HTTP 400) | Run not started |
+| No active queries | Toast error (HTTP 400) | Run not started |
+| 5 concurrent web discovery runs | Toast error (HTTP 429) | Run queued/rejected until slot free |
+
+
+
+**Failure states:**
+
+| Condition | What the operator sees | What the system does |
+|-----------|------------------------|----------------------|
+| Exa error on one query (batch) | Warning in activity log | Other queries in batch continue |
+| Pipeline crash | `failed` status; error on results page | Run stops; partial `engine_outputs` may exist |
+| Empty results | Completed run with zero sources | Operator adjusts query scope and re-runs |
+
+
+
 ---
 
 ### 2.6 View results
 
-| Component | Action | Backend |
-|-----------|--------|---------|
-| **View Query Results** / auto-navigate | Open after run | `GET /api/web-discovery/queries/:id/results?run_id=` |
-| **Run selector** | Pick a past run | Loads historical result slice |
-| **Filter / Sort** | Client-side | Filters title, URL, summary |
-| **Run again** | Click → confirm | Returns to query editor to re-run |
-| **Edit query** | Click | Navigates to query editor |
+**What the operator is trying to do:** Review Exa hits, compare runs, and decide whether to re-run or edit the query — the implemented end point for Web Discovery today.
+
+| Component | Action | Action type | Backend |
+|-----------|--------|-------------|---------|
+| **View Query Results** / auto-navigate | Open after run | Navigate | `GET /api/web-discovery/queries/:id/results?run_id=` |
+| **Run selector** | Pick a past run | Filter | Loads historical result slice |
+| **Filter / Sort** | Client-side | Filter | Filters title, URL, summary |
+| **Run again** | Click → confirm | Run | Returns to query editor to re-run |
+| **Edit query** | Click | Navigate | Navigates to query editor |
 
 **Flow:**
 
@@ -140,9 +200,20 @@ For each active query the backend calls Exa search with the query's content sett
 
 Each result shows URL, title, snippet, Exa score, and optional highlights/summary/text from Exa content modes.
 
+**Failure states:**
+
+| Condition | What the operator sees | What the system does |
+|-----------|------------------------|----------------------|
+| Escalate / Save / Dismiss | No buttons on results page | Not implemented — operator reviews only |
+| Post-run NORAD LLM analysis | Exa vendor summaries only | No NORAD LLM step — see §2.7 |
+
+
+
 ---
 
 ### 2.7 AI analysis and result disposition (Web Discovery)
+
+**What the operator is trying to do:** Understand what AI runs today on Web Discovery results and what save / dismiss / escalate actions exist (most are not implemented yet).
 
 | Step | LLM in pipeline? | User action? | Detail |
 |------|------------------|--------------|--------|
@@ -153,6 +224,15 @@ Each result shows URL, title, snippet, Exa score, and optional highlights/summar
 | Escalate result | — | **No** | No escalate to research or user frontend from results page |
 
 Implemented end point: operator reviews Exa results on the results page. See §5–§6 for full LLM and disposition matrix.
+
+**Failure states:**
+
+| Condition | What the operator sees | What the system does |
+|-----------|------------------------|----------------------|
+| Expecting NORAD LLM on results | No analysis step after Exa | Query LLM fields stored but not executed |
+| Expecting save / dismiss / escalate | No buttons on results page | Results auto-persist in `engine_outputs` only |
+
+
 
 ---
 
@@ -217,6 +297,8 @@ flowchart TD
 
 ### 2.11 Errors and limits
 
+*Summary table — per-step failure states are in §2.2–2.6 above.*
+
 | Condition | UI response |
 |-----------|-------------|
 | Cluster paused | Toast error (HTTP 400) |
@@ -245,24 +327,38 @@ Operators pick a Trend Hunter keyword cluster and date window, run AI-ranked art
 
 ### 3.2 Start a discovery run
 
-| Component | Action | Backend |
-|-----------|--------|---------|
-| **Discovery cluster** dropdown | Select cluster | Cluster `keywords[]` applied on run start |
-| **Published window** | Select preset or custom dates | Date bounds sent with run |
-| **Discover** button | Click | `POST /api/discovery/runs` → 5-stage pipeline |
+**What the operator is trying to do:** Run the Today pipeline — find and rank Trend Hunter articles for a keyword theme and date window.
+
+| Component | Action | Action type | Backend |
+|-----------|--------|-------------|---------|
+| **Discovery cluster** dropdown | Select cluster | Configure | Cluster `keywords[]` applied on run start |
+| **Published window** | Select preset or custom dates | Configure | Date bounds sent with run |
+| **Discover** button | Click | Run | `POST /api/discovery/runs` → 5-stage pipeline |
 
 **Flow:**
 
 `Sidebar → Today` → `Cluster dropdown (select)` → `Date window (select)` → `Discover (click)`
 
+**Failure states:**
+
+| Condition | What the operator sees | What the system does |
+|-----------|------------------------|----------------------|
+| No cluster selected | Discover disabled | Run not started |
+| Run already active | Button shows **Running…** | Second run blocked |
+| 5 concurrent runs | Toast error (HTTP 429) | Run rejected |
+
+
+
 ---
 
 ### 3.3 Monitor the run
 
-| Component | Action | Backend |
-|-----------|--------|---------|
-| **Activity** panel | Watch timeline | SSE `run_events` — stages 1–5 |
-| **Run group** | Expand to see progress | Polls `runs.status` |
+**What the operator is trying to do:** Watch all five Today stages complete and confirm articles were ranked and extracted.
+
+| Component | Action | Action type | Backend |
+|-----------|--------|-------------|---------|
+| **Activity** panel | Watch timeline | Monitor | SSE `run_events` — stages 1–5 |
+| **Run group** | Expand to see progress | Monitor | Polls `runs.status` |
 
 | Stage | Engine | Output |
 |-------|--------|--------|
@@ -280,17 +376,29 @@ Operators pick a Trend Hunter keyword cluster and date window, run AI-ranked art
 
 ### 3.4 Review results and start research
 
-| Component | Action | Backend |
-|-----------|--------|---------|
-| **Article card** | Review ranked article | `trend_articles` (`status = extracted`) |
-| **Profile** button | Click primary company | `POST /api/research/runs` → deep research |
-| **Countdown banner** | Wait or Go now | Navigates to `/companies` |
+**What the operator is trying to do:** Review ranked articles and **escalate** the primary company into deep research — the main action on Today after discovery completes.
+
+| Component | Action | Action type | Backend |
+|-----------|--------|-------------|---------|
+| **Article card** | Review ranked article | Read | `trend_articles` (`status = extracted`) |
+| **Profile** button | Click primary company | Escalate | `POST /api/research/runs` → deep research |
+| **Countdown banner** | Wait or Go now | Navigate | Navigates to `/companies` |
 
 **Flow:**
 
 `Run group (expand)` → `Article card (review)` → `Profile (click)` → `Start research (confirm)` → `Companies`
 
 Clicking **Profile** escalates the primary company into deep research (§4). **Detach/Clear** only stops UI tracking — it does not dismiss articles. **Archive** on the Activity panel is a label for a finished log, not delete. Article dismiss exists as API only (`POST /api/discovery/articles/:id/dismiss`) with **no button** on cards.
+
+**Failure states:**
+
+| Condition | What the operator sees | What the system does |
+|-----------|------------------------|----------------------|
+| Sonnet extract fails (one article) | Warning in Activity log | Article skipped; not shown on cards; run continues |
+| Haiku rank fails (whole batch) | Toast + error banner | Entire run fails — no auto-retry |
+| Article dismiss | No button on cards | API exists only — not exposed in UI |
+
+
 
 ---
 
@@ -322,6 +430,8 @@ flowchart TD
 
 ### 3.6 Errors, fallbacks, and limits
 
+*Summary table — per-step failure states are in §3.2–3.4 above.*
+
 | Condition | Backend behaviour | UI response |
 |-----------|-------------------|-------------|
 | Haiku rank fails (whole batch) | Run `failed` — no auto-retry | Toast + error banner |
@@ -350,11 +460,13 @@ Deep research builds a structured company profile from web evidence. On the admi
 
 ### 4.2 Start research from Today
 
-| Component | Action | Backend |
-|-----------|--------|---------|
-| **Profile** button | Click beside article card | Opens confirmation modal |
-| **Start research** | Confirm in modal | `POST /api/research/runs` with `{ company_name, trend_article_id }` |
-| **Countdown banner** | Wait 3 s or **Go now** | Navigates to `/companies` |
+**What the operator is trying to do:** Confirm deep research on the primary company from a Today article — escalate from discovery to full company profile.
+
+| Component | Action | Action type | Backend |
+|-----------|--------|-------------|---------|
+| **Profile** button | Click beside article card | Escalate | Opens confirmation modal |
+| **Start research** | Confirm in modal | Escalate | `POST /api/research/runs` with `{ company_name, trend_article_id }` |
+| **Countdown banner** | Wait 3 s or **Go now** | Navigate | Navigates to `/companies` |
 
 **Flow:**
 
@@ -362,17 +474,26 @@ Deep research builds a structured company profile from web evidence. On the admi
 
 The research run starts immediately on confirm. The countdown only controls navigation timing — cancelling it keeps the operator on Today while research continues.
 
+**Failure states:**
+
+| Condition | What the operator sees | What the system does |
+|-----------|------------------------|----------------------|
+| 5 concurrent research runs | Toast error (HTTP 429) | Run rejected until slot free |
+| Research already running for company | Existing row shows **Profiling…** | New run may queue or coalesce per API rules |
+
 ---
 
 ### 4.3 Companies page — browse and monitor
 
-| Component | Action | Backend |
-|-----------|--------|---------|
-| **Activity** panel (left) | Watch timeline for focused company | SSE `run_events`; shows stages, costs, synthesis retry events (§5.1) |
-| **Company row** (collapsed) | Click row header | Expands excerpt; Activity panel switches to that company's latest run |
-| **Status pill** | Read | `Profiling…` (live), `Done` (completed), or `failed` / `cancelled` |
-| **Overall score** | Read (right side) | From completed Company Card |
-| **Run count** | Read | e.g. `6 RUNS` — number of research passes for this company |
+**What the operator is trying to do:** Monitor in-flight research runs and open completed company profiles.
+
+| Component | Action | Action type | Backend |
+|-----------|--------|-------------|---------|
+| **Activity** panel (left) | Watch timeline for focused company | Monitor | SSE `run_events`; shows stages, costs, synthesis retry events (§5.1) |
+| **Company row** (collapsed) | Click row header | Navigate | Expands excerpt; Activity panel switches to that company's latest run |
+| **Status pill** | Read | Read | `Profiling…` (live), `Done` (completed), or `failed` / `cancelled` |
+| **Overall score** | Read (right side) | Read | From completed Company Card |
+| **Run count** | Read | Read | e.g. `6 RUNS` — number of research passes for this company |
 
 **Flow:**
 
@@ -384,13 +505,15 @@ On load: `GET /api/research/feed`. Live rows poll every 3 s; completed rows ever
 
 ### 4.4 Expanded company row — objects and actions
 
-| Object / button | Action | Backend |
-|-----------------|--------|---------|
-| **Strategic fit** block | Read summary + recommendation pill (e.g. MONITOR) | From `cards.card.strategic_fit` |
-| **Top signals** list | Read first 2 signals (type + headline) | From `signals` table |
-| **View run log →** | Click | Navigate to `/runs/:id` — full run header + Activity feed |
-| **Cancel run** | Click while profiling (live only) | `POST /api/research/runs/:id/cancel` |
-| **Open full page →** | Click | Navigate to `/companies/:id` |
+**What the operator is trying to do:** Read the research excerpt, open the full profile or run log, or cancel a live run.
+
+| Object / button | Action | Action type | Backend |
+|-----------------|--------|-------------|---------|
+| **Strategic fit** block | Read summary + recommendation pill (e.g. MONITOR) | Read | From `cards.card.strategic_fit` |
+| **Top signals** list | Read first 2 signals (type + headline) | Read | From `signals` table |
+| **View run log →** | Click | Navigate | Navigate to `/runs/:id` — full run header + Activity feed |
+| **Cancel run** | Click while profiling (live only) | Cancel | `POST /api/research/runs/:id/cancel` |
+| **Open full page →** | Click | Navigate | Navigate to `/companies/:id` |
 
 **Flow:**
 
@@ -398,21 +521,31 @@ On load: `GET /api/research/feed`. Live rows poll every 3 s; completed rows ever
 
 **Cancel run** stops the pipeline at the next checkpoint. Engine calls already in flight may finish, but no company/card/signals are saved from that run.
 
+**Failure states:**
+
+| Condition | What the operator sees | What the system does |
+|-----------|------------------------|----------------------|
+| Run cancelled | Row shows `cancelled` | No card saved from that run |
+| Run failed | Row shows `failed` | No card saved — operator may re-run Profile |
+| Card excerpt loading | Spinner on expand | Lazy-load via `GET /api/research/companies/:id` |
+
 ---
 
 ### 4.5 Company detail page (`/companies/:id`)
 
-| Component | Action | Backend |
-|-----------|--------|---------|
-| **Company header** | Read name, domain, overall score, confidence | `GET /api/research/companies/:id` |
-| **Follow / Signal Alert / Share** | Click | **No handler** — UI shell only |
-| **Key facts panels** | Read classification, financials, team | From `CompanyCardV1` JSON |
-| **Strategic Fit** section | Read narrative | LLM-synthesized in Stage 3 |
-| **Signals** section | Read all signals with evidence | `signals` table |
-| **Sources** section | Read cited URLs | `sources` table |
-| **Research Evidence** | Expand engine I/O | `GET /api/research/companies/:id/evidence` |
-| **Profile history** | Click a past run row | `/runs/:id`; cancel available on in-flight runs |
-| **Cancel run** (history) | Click on active run | `POST /api/research/runs/:id/cancel` |
+**What the operator is trying to do:** Read the full company profile — strategic fit, signals, sources, and research evidence.
+
+| Component | Action | Action type | Backend |
+|-----------|--------|-------------|---------|
+| **Company header** | Read name, domain, overall score, confidence | Read | `GET /api/research/companies/:id` |
+| **Follow / Signal Alert / Share** | Click | — | **No handler** — UI shell only |
+| **Key facts panels** | Read classification, financials, team | Read | From `CompanyCardV1` JSON |
+| **Strategic Fit** section | Read narrative | Read | LLM-synthesized in Stage 3 |
+| **Signals** section | Read all signals with evidence | Read | `signals` table |
+| **Sources** section | Read cited URLs | Read | `sources` table |
+| **Research Evidence** | Expand engine I/O | Read | `GET /api/research/companies/:id/evidence` |
+| **Profile history** | Click a past run row | Navigate | `/runs/:id`; cancel available on in-flight runs |
+| **Cancel run** (history) | Click on active run | Cancel | `POST /api/research/runs/:id/cancel` |
 
 **Flow:**
 
@@ -422,12 +555,14 @@ On load: `GET /api/research/feed`. Live rows poll every 3 s; completed rows ever
 
 ### 4.6 Run log page (`/runs/:id`)
 
-| Component | Action | Backend |
-|-----------|--------|---------|
-| **Run header** | Read status, progress, company link | `GET /api/research/runs/:id` (polls every 2 s while live) |
-| **Stages summary** | Read completed pipeline stages | From run record |
-| **Activity feed** (right) | Watch or review saved log | SSE when live; **Archive** label when complete |
-| **Open company** CTA | Click when run completed | Links to `/companies/:id` |
+**What the operator is trying to do:** Monitor or review a single research run's pipeline stages and activity log.
+
+| Component | Action | Action type | Backend |
+|-----------|--------|-------------|---------|
+| **Run header** | Read status, progress, company link | Read | `GET /api/research/runs/:id` (polls every 2 s while live) |
+| **Stages summary** | Read completed pipeline stages | Read | From run record |
+| **Activity feed** (right) | Watch or review saved log | Monitor | SSE when live; **Archive** label when complete |
+| **Open company** CTA | Click when run completed | Navigate | Links to `/companies/:id` |
 
 **Flow:**
 
@@ -463,6 +598,8 @@ flowchart TD
 ---
 
 ### 4.8 Errors, fallbacks, and limits
+
+*Summary table — per-step failure states are in §4.2–4.4 above.*
 
 | Condition | Backend behaviour | UI response |
 |-----------|-------------------|-------------|
@@ -633,13 +770,15 @@ Discovery Clusters administers the keyword libraries used by the **Today** page.
 
 ### 8.2 Manage clusters
 
-| Component | Action | Backend |
-|-----------|--------|---------|
-| **New cluster** | Click | Opens create dialog |
-| **Cluster card → Edit** | Click | Opens edit dialog with existing values |
-| **Cluster card → Make default** | Click | `PUT /api/discovery/clusters/:id` with `is_default: true` |
-| **Cluster card → Delete** | Click → confirm | `DELETE /api/discovery/clusters/:id` |
-| **Create / Save changes** (dialog) | Submit form | `POST` or `PUT /api/discovery/clusters` |
+**What the operator is trying to do:** Maintain keyword themes that feed the Today page cluster dropdown — scope before running **Discover**.
+
+| Component | Action | Action type | Backend |
+|-----------|--------|-------------|---------|
+| **New cluster** | Click | Navigate | Opens create dialog |
+| **Cluster card → Edit** | Click | Navigate | Opens edit dialog with existing values |
+| **Cluster card → Make default** | Click | Configure | `PUT /api/discovery/clusters/:id` with `is_default: true` |
+| **Cluster card → Delete** | Click → confirm | Configure | `DELETE /api/discovery/clusters/:id` |
+| **Create / Save changes** (dialog) | Submit form | Configure | `POST` or `PUT /api/discovery/clusters` |
 
 **Form fields:** name, group, description, keywords (comma or newline), Enabled checkbox, Set as default checkbox.
 
@@ -652,6 +791,16 @@ Discovery Clusters administers the keyword libraries used by the **Today** page.
 `Discovery Clusters` → `Edit (click)` → `Update keywords / enabled (save)` → changes apply on next **Discover** on Today
 
 Deleting a cluster removes it from the Today dropdown. Existing `trend_articles` and past runs are unaffected. If the default cluster is deleted, the next cluster by `sort_order` is promoted.
+
+**Failure states:**
+
+| Condition | What the operator sees | What the system does |
+|-----------|------------------------|----------------------|
+| Delete default cluster | Confirm dialog | Next cluster by `sort_order` promoted as default |
+| Empty keywords on save | Validation error | Cluster not saved |
+| Disabled cluster | Not in Today dropdown | Discover skips that cluster |
+
+
 
 ---
 
@@ -679,31 +828,45 @@ Operators maintain keyword themes here; Today only shows cluster names — keywo
 
 ### 9.2 System status
 
-| Component | Action | Backend |
-|-----------|--------|---------|
-| **Postgres (Supabase)** status | Read | `GET /health/db` |
-| **Redis (Upstash)** status | Read | Same health check |
+**What the operator is trying to do:** Confirm Postgres and Redis are reachable before running pipelines.
+
+| Component | Action | Action type | Backend |
+|-----------|--------|-------------|---------|
+| **Postgres (Supabase)** status | Read | Read | `GET /health/db` |
+| **Redis (Upstash)** status | Read | Read | Same health check |
 
 ---
 
 ### 9.3 Research engine configuration
 
-| Component | Action | Backend |
-|-----------|--------|---------|
-| **Parallel — Processor** | Select tier (lite → ultra8x) | Stored in `app_kv` key `research_config` |
-| **Parallel — Timeout** | Set seconds (60–3600) | Same |
-| **Exa — Search type** | Select (auto, fast, neural, keyword, deep) | Same |
-| **Exa — Deep model** | Select when search type = deep | Same |
-| **Exa — Results per query** | Set count (1–50) | Same |
-| **Diffbot — Enabled** | Toggle on/off | Same |
-| **Diffbot — Score threshold** | Set 0.0–1.0 | Same |
-| **Save changes** | Click (enabled when dirty) | `PUT /api/settings/research` |
+**What the operator is trying to do:** Tune Parallel, Exa, and Diffbot settings so the next deep research run uses the right cost/quality trade-off.
+
+| Component | Action | Action type | Backend |
+|-----------|--------|-------------|---------|
+| **Parallel — Processor** | Select tier (lite → ultra8x) | Configure | Stored in `app_kv` key `research_config` |
+| **Parallel — Timeout** | Set seconds (60–3600) | Configure | Same |
+| **Exa — Search type** | Select (auto, fast, neural, keyword, deep) | Configure | Same |
+| **Exa — Deep model** | Select when search type = deep | Configure | Same |
+| **Exa — Results per query** | Set count (1–50) | Configure | Same |
+| **Diffbot — Enabled** | Toggle on/off | Configure | Same |
+| **Diffbot — Score threshold** | Set 0.0–1.0 | Configure | Same |
+| **Save changes** | Click (enabled when dirty) | Configure | `PUT /api/settings/research` |
 
 **Flow:**
 
 `Sidebar → Settings` → `Adjust engine parameters` → `Save changes (click)`
 
 Changes apply to the **next** research run, not runs already in flight. In production (`debug=False`), save requires `X-Admin-Token` header.
+
+**Failure states:**
+
+| Condition | What the operator sees | What the system does |
+|-----------|------------------------|----------------------|
+| Save without admin token (prod) | 403 error toast | Settings not persisted |
+| In-flight research run | Run unaffected | New config applies on **next** run only |
+| Invalid threshold value | Inline validation | Save blocked |
+
+
 
 ---
 
@@ -730,14 +893,3 @@ Changes apply to the **next** research run, not runs already in flight. In produ
 | Author | Huzaifa | 2026-06-08 | Draft |
 | Reviewer | Shehrayar Haq | — | Pending |
 
----
-
-## 12. Revision history
-
-| Version | Date | Author | Description |
-|---------|------|--------|-------------|
-| 1.0–1.3 | 2026-06-08 | huzaifa | Today workflow; format iterations |
-| 2.0 | 2026-06-08 | huzaifa | Web Discovery primary workflow |
-| 2.1 | 2026-06-08 | huzaifa | Deep research UI guide; LLM/save/dismiss/escalate definitions; honest completion status |
-| 2.2 | 2026-06-08 | huzaifa | §5.1 AI failure and fallback/retry behaviour per pipeline |
-| 2.3 | 2026-06-08 | huzaifa | Companies UI objects, Discovery Clusters, Settings workflows |

@@ -30,9 +30,10 @@ All current-state claims are verified against `apps/web`, `apps/api`, and `apps/
 |-----|-------|---------|--------|
 | P1-00 | [Phase 1 Overview](./phase-1-overview.md) | 0.4 | Draft |
 | P1-01 | Core User Workflow | 1.0 | Draft — primary flows documented |
-| P1-01-Admin | [Core Operator Workflow — Admin Console](./P1-01-admin.md) | 2.3 | Draft |
-| P1-01-User | [Core Analyst Workflow](./P1-01-user.md) | 1.6 | Draft |
-| P1-02 | Core Product Objects | — | Not started |
+| P1-01-Admin | [Core Operator Workflow — Admin Console](./P1-01-admin.md) | 2.4 | Draft |
+| P1-01-User | [Core Analyst Workflow](./P1-01-user.md) | 1.7 | Draft |
+| P1-02-Admin | [Core Product Objects — Admin Console](./P1-02-admin.md) | 1.0 | Draft |
+| P1-02-User | [Core Product Objects](./P1-02-user.md) | 1.2 | Draft |
 | P1-03 | Object Relationships | — | Not started |
 | P1-04 | Required Fields per Object | — | Not started |
 | P1-05 | UI Screen Mapping | — | Not started |

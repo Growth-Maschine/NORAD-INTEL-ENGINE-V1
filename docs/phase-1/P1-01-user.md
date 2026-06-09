@@ -4,7 +4,7 @@
 |-------|-------|
 | **Document ref** | P1-01-User |
 | **Title** | Core Analyst Workflow |
-| **Version** | 1.6 |
+| **Version** | 1.7 |
 | **Status** | Draft |
 | **Last updated** | 2026-06-08 |
 | **Audience** | Stakeholders, product, and analyst users |
@@ -21,11 +21,14 @@ This document describes the analyst experience in plain language. It explains wh
 
 | Block | Purpose |
 |-------|---------|
-| **UI guide** | Each clickable element and what the user sees |
+| **What the user is trying to do** | The goal of this step in the analyst journey — why this screen exists |
+| **UI guide** | Component, user action, **action type**, and what the user sees |
 | **Behind the scenes** | Pipeline flow line + short paragraph (engines, LLM steps, what gets saved) |
 | **Flow** | One-line click path |
-| **Explanation** | Short paragraph tying the steps together |
-| **Diagram** | Visual map of the same flow |
+| **Failure states** | What the user sees and what the system does when something goes wrong *(action steps only)* |
+| **Diagram** | Visual map of the same flow *(end of each workflow)* |
+
+**Action types:** `Read` · `Navigate` · `Filter` · `Escalate` · `Dismiss` · `Configure` · `—` (display only)
 
 Workflows are ordered as the analyst experiences them, starting from the **Home page**.
 
@@ -50,15 +53,17 @@ The **Top** tab is the analyst's weekly briefing. The **News** tab is where they
 
 The **first section** on the Top tab. Shows this week's signals for companies the analyst has already promoted to the **Watchlist** (after deep research and **Promote** in Pending review).
 
-| Component | User action | What the user sees |
-|-----------|-------------|-------------------|
-| **Top** tab | Click | Top view opens (alongside News) |
-| **Opportunities this week — Watchlist** heading | Read | Section title |
-| **Subtitle** | Read | e.g. "This week's signals and news for companies on your watchlist" |
-| **Company card** | Read | Company name (e.g. Pendulum Therapeutics, Ultra Pouches) |
-| **Category tag** | Read | Industry segment (e.g. PARTNER, FUND) |
-| **Signal tag** | Read | Event type (e.g. Partnership, Funding round) |
-| **Bullet points** | Read | Identified signals for that company this week |
+**What the user is trying to do:** Catch up on this week's activity for companies already on the Watchlist — without scanning the full News feed.
+
+| Component | User action | Action type | What the user sees |
+|-----------|-------------|-------------|-------------------|
+| **Top** tab | Click | Navigate | Top view opens (alongside News) |
+| **Opportunities this week — Watchlist** heading | Read | Read | Section title |
+| **Subtitle** | Read | Read | e.g. "This week's signals and news for companies on your watchlist" |
+| **Company card** | Read | Read | Company name (e.g. Pendulum Therapeutics, Ultra Pouches) |
+| **Category tag** | Read | Read | Industry segment (e.g. PARTNER, FUND) |
+| **Signal tag** | Read | Read | Event type (e.g. Partnership, Funding round) |
+| **Bullet points** | Read | Read | Identified signals for that company this week |
 
 **Behind the scenes:**
 
@@ -72,20 +77,30 @@ Watchlist monitoring and rules engine — **planned**; Top tab layout is availab
 
 `Sidebar → Home` → `Top tab` → `Opportunities this week — Watchlist` → `Read company signals`
 
+**Failure states:**
+
+| Condition | What the user sees | What the system does |
+|-----------|-------------------|----------------------|
+| No companies on Watchlist yet | Section empty or hidden | Nothing to show until first **Promote** |
+| Monitoring not live | Static or stale cards | Layout visible; weekly refresh planned |
+| No signals matched rules this week | Empty section or "no activity" message | Company stays on Watchlist; no false positives shown |
+
 ---
 
 ### 2.3 Top tab — Opportunities this week — Industry
 
 The **second section** below Watchlist on the Top tab. Shows sector-wide opportunity signals drawn from the **News** feed and cluster monitoring — not limited to Watchlist companies.
 
-| Component | User action | What the user sees |
-|-----------|-------------|-------------------|
-| **Opportunities this week — Industry** heading | Read | Section title |
-| **Subtitle** | Read | e.g. "This week's sector moves from industry news, clusters, and your monitored roster" |
-| **Opportunity card** | Read | Company name or sector headline (e.g. Reynolds American, Health Canada draft rule) |
-| **Category tag** | Read | Segment (e.g. FDA, HC, IP, FUND) |
-| **Signal tag** | Read | Event type (e.g. FDA filing, Health Canada filing, Patent / IP) |
-| **Bullet points** | Read | Key opportunity signals extracted from news |
+**What the user is trying to do:** See the week's highest-priority sector moves the system surfaced automatically — industry-wide, not limited to Watchlist companies.
+
+| Component | User action | Action type | What the user sees |
+|-----------|-------------|-------------|-------------------|
+| **Opportunities this week — Industry** heading | Read | Read | Section title |
+| **Subtitle** | Read | Read | e.g. "This week's sector moves from industry news, clusters, and your monitored roster" |
+| **Opportunity card** | Read | Read | Company name or sector headline (e.g. Reynolds American, Health Canada draft rule) |
+| **Category tag** | Read | Read | Segment (e.g. FDA, HC, IP, FUND) |
+| **Signal tag** | Read | Read | Event type (e.g. FDA filing, Health Canada filing, Patent / IP) |
+| **Bullet points** | Read | Read | Key opportunity signals extracted from news |
 
 **Behind the scenes:**
 
@@ -105,6 +120,14 @@ Rules engine and auto-surfacing — **planned**; Industry section layout is avai
 |---------|--------|--------------|
 | **Watchlist** | Companies the analyst **Promoted** after deep research | This week's signals for **monitored watchlist companies only** |
 | **Industry** | **News** tab and cluster monitoring | Sector-wide opportunities from **all qualifying news** — watchlist or not |
+
+**Failure states:**
+
+| Condition | What the user sees | What the system does |
+|-----------|-------------------|----------------------|
+| Rules engine not live | Empty or demo cards | Layout visible; auto-surfacing planned |
+| No articles matched criteria this week | Empty Industry section | No cards added — analyst uses News tab instead |
+| Cluster not configured | Sparse or no industry content | No new articles to evaluate until clusters exist |
 
 ---
 
@@ -135,13 +158,15 @@ flowchart TD
 
 ### 2.5 News tab — Browse Hot News
 
-| Component | User action | What the user sees |
-|-----------|-------------|-------------------|
-| **Sidebar → Home** | Click | Home page opens |
-| **News** tab | Click (default) | Hot News table loads |
-| **News row** | Read | Headline, one-line summary, category tag, signal tag, score, age (e.g. 18d) |
-| **Full feed →** | Click | Extended news list |
-| **Row chevron (›)** | Click | Row expands to full article detail |
+**What the user is trying to do:** Scan the highest-priority market signals and pick stories worth expanding — the first step toward flagging a company for deep research.
+
+| Component | User action | Action type | What the user sees |
+|-----------|-------------|-------------|-------------------|
+| **Sidebar → Home** | Click | Navigate | Home page opens |
+| **News** tab | Click (default) | Navigate | Hot News table loads |
+| **News row** | Read | Read | Headline, one-line summary, category tag, signal tag, score, age (e.g. 18d) |
+| **Full feed →** | Click | Navigate | Extended news list |
+| **Row chevron (›)** | Click | Navigate | Row expands to full article detail |
 
 **Behind the scenes:**
 
@@ -155,20 +180,30 @@ Configured Search Clusters hold one or more search queries. When a cluster runs 
 
 The analyst lands on Home and reads the highest-priority market signal. Category tags (e.g. MED-NIC, VAPE) show industry segment. Signal tags (e.g. FUND, FDA, LEGAL) show event type. The red score shows priority.
 
+**Failure states:**
+
+| Condition | What the user sees | What the system does |
+|-----------|-------------------|----------------------|
+| No clusters configured | Empty Hot News table | No articles ingested until Search Clusters exist (§7) |
+| Cluster run produced zero hits | Empty table or "no stories" message | Run completed with no matches — analyst adjusts cluster scope |
+| Scheduled runs not live | Stale feed (older dates) | Manual cluster runs only until scheduling ships |
+
 ---
 
 ### 2.6 Expanded article
 
-| Component | User action | What the user sees |
-|-----------|-------------|-------------------|
-| **Executive summary** | Read | Short analyst-style summary of the article |
-| **Why it matters** | Read | Strategic context for the business |
-| **What to watch next** | Read | Follow-up items to monitor |
-| **Key facts** | Read | Category label and signal type |
-| **Signal score** | Read | Overall score (e.g. 92/100) plus relevance, recency, magnitude, and source trust bars |
-| **Related coverage** | Click VIEW | Other articles on the same story |
-| **OPEN** | Click | Source article opens in a new browser tab |
-| **Bookmark / share icons** | Click | Save or share the article |
+**What the user is trying to do:** Decide whether this story is strong enough to escalate a company — read the AI summary, signal score, and companies mentioned before clicking **+ ADD**.
+
+| Component | User action | Action type | What the user sees |
+|-----------|-------------|-------------|-------------------|
+| **Executive summary** | Read | Read | Short analyst-style summary of the article |
+| **Why it matters** | Read | Read | Strategic context for the business |
+| **What to watch next** | Read | Read | Follow-up items to monitor |
+| **Key facts** | Read | Read | Category label and signal type |
+| **Signal score** | Read | Read | Overall score (e.g. 92/100) plus relevance, recency, magnitude, and source trust bars |
+| **Related coverage** | Click VIEW | Navigate | Other articles on the same story |
+| **OPEN** | Click | Navigate | Source article opens in a new browser tab |
+| **Bookmark / share icons** | Click | — | Save or share the article |
 
 **Behind the scenes:**
 
@@ -180,16 +215,25 @@ Before an article is ready to expand, an **AI analysis step** (Claude LLM) has t
 
 `News row chevron (click)` → `Read expanded article` → `Review signal score and summary`
 
+**Failure states:**
+
+| Condition | What the user sees | What the system does |
+|-----------|-------------------|----------------------|
+| AI enrichment still running | Partial expand or loading state | Summary and scores appear when pipeline completes |
+| Source URL unavailable | OPEN button disabled or error | Article metadata shown without live source link |
+| Low signal score | Score bars shown but low values | Analyst may skip **+ ADD** — no system block |
+
 ---
+
 ### 2.7 Companies in story
 
 **What the user is trying to do:** Escalate a company spotted in a news signal into deep research for full profiling. This is the primary action the entire News tab exists to support — everything before this step (browsing, expanding, reading scores) is leading here.
 
 | Component | User action | Action type | What the user sees |
-|-----------|-------------|-------------------|-------------------|
-| **Companies in story** block | Read | — | Companies mentioned in the article |
-| **PRIMARY** badge | Read | — | Main subject company |
-| **PARTNER** badge | Read | — | Secondary or partner company |
+|-----------|-------------|-------------|-------------------|
+| **Companies in story** block | Read | Read | Companies mentioned in the article |
+| **PRIMARY** badge | Read | Read | Main subject company |
+| **PARTNER** badge | Read | Read | Secondary or partner company |
 | **Company chevron** | Click | Navigate | Expands company description blurb |
 | **+ ADD** button | Click | **Escalate** | Queues company for deep research → sends to Pending review |
 
@@ -210,7 +254,7 @@ Clicking **+ ADD** starts the full **Deep Research** pipeline on the NORAD backe
 | Condition | What the user sees | What the system does |
 |-----------|-------------------|----------------------|
 | Company already in Pending review | Toast: "Already queued" or button disabled | No duplicate run started |
-| Stage 2 — one engine fails (Parallel, Exa, or Diffbot) | No visible change  research continues | Run proceeds with remaining engines |
+| Stage 2 — one engine fails (Parallel, Exa, or Diffbot) | No visible change — research continues | Run proceeds with remaining engines |
 | Stage 2 — all three engines fail | Pending review row shows failed state | Run stops; no profile saved; analyst can retry |
 | Stage 3 — AI synthesis fails (unrecoverable) | Pending review row shows failed state | Run stops; no profile saved |
 | Article has no companies detected | Companies in story block absent or empty | No + ADD button shown |
@@ -312,17 +356,19 @@ The **Signals** page shows the **same incoming news** that feeds Home → **News
 
 ### 3.2 Category filter tabs
 
-| Component | User action | What the user sees |
-|-----------|-------------|-------------------|
-| **All** tab | Click | Every signal in the feed (e.g. 11 stories) |
-| **Companies** tab | Click | Company-focused signals only (e.g. 7) |
-| **Industry** tab | Click | Sector-wide signals (e.g. 2 — grey-market vapes, sentiment trends) |
-| **Regulatory** tab | Click | Regulatory signals (e.g. 3) |
-| **Filings** tab | Click | Filing signals — FDA, Health Canada, etc. (e.g. 2) |
-| **Hiring** tab | Click | Hiring signals (e.g. 0 when none match) |
-| **Funding** tab | Click | Funding-round signals (e.g. 3) |
-| **Tab count badge** | Read | Number of stories matching that category's rules |
-| **Header subtitle** | Read | Updates per tab — e.g. "2 in industry · updated 4m ago" |
+**What the user is trying to do:** Triage the full news feed by signal type — find all regulatory, funding, or filing stories without re-reading every row on Home News.
+
+| Component | User action | Action type | What the user sees |
+|-----------|-------------|-------------|-------------------|
+| **All** tab | Click | Filter | Every signal in the feed (e.g. 11 stories) |
+| **Companies** tab | Click | Filter | Company-focused signals only (e.g. 7) |
+| **Industry** tab | Click | Filter | Sector-wide signals (e.g. 2 — grey-market vapes, sentiment trends) |
+| **Regulatory** tab | Click | Filter | Regulatory signals (e.g. 3) |
+| **Filings** tab | Click | Filter | Filing signals — FDA, Health Canada, etc. (e.g. 2) |
+| **Hiring** tab | Click | Filter | Hiring signals (e.g. 0 when none match) |
+| **Funding** tab | Click | Filter | Funding-round signals (e.g. 3) |
+| **Tab count badge** | Read | Read | Number of stories matching that category's rules |
+| **Header subtitle** | Read | Read | Updates per tab — e.g. "2 in industry · updated 4m ago" |
 
 **Behind the scenes:**
 
@@ -333,6 +379,14 @@ When articles enter the system from Search Clusters (§7), each one is enriched 
 **Flow:**
 
 `Sidebar → Signals` → `Select category tab (All / Companies / Industry / …)`
+
+**Failure states:**
+
+| Condition | What the user sees | What the system does |
+|-----------|-------------------|----------------------|
+| Tab has zero matches | Tab shows count `0`; empty table | No rows for that category — analyst switches tab |
+| Rules engine not live | All tabs show same unfiltered list | Categorization planned — counts may not reflect rules yet |
+| Feed stale | "updated Xm ago" shows old timestamp | No new cluster runs since last ingestion |
 
 ---
 
@@ -422,12 +476,14 @@ After **+ ADD**, the company appears in **Pending review**. The sidebar badge sh
 
 ### 4.2 Review queue
 
-| Component | User action | What the user sees |
-|-----------|-------------|-------------------|
-| **Pending review** (sidebar) | Click | Review table opens |
-| **All / Bookmarked / Manual** tabs | Click | Filter list by how the company arrived |
-| **Table row** | Read | Origin, company name, URL, context, time added |
-| **Row chevron** | Click | Expands detail for that company |
+**What the user is trying to do:** See every company waiting for a go / no-go decision after deep research — and open the one to review first.
+
+| Component | User action | Action type | What the user sees |
+|-----------|-------------|-------------|-------------------|
+| **Pending review** (sidebar) | Click | Navigate | Review table opens |
+| **All / Bookmarked / Manual** tabs | Click | Filter | Filter list by how the company arrived |
+| **Table row** | Read | Read | Origin, company name, URL, context, time added |
+| **Row chevron** | Click | Navigate | Expands detail for that company |
 
 **Behind the scenes:**
 
@@ -439,17 +495,27 @@ Each row is tied to a Deep Research run. While **Stage 2** (Parallel, Exa, Diffb
 
 `Sidebar → Pending review` → `Review table`
 
+**Failure states:**
+
+| Condition | What the user sees | What the system does |
+|-----------|-------------------|----------------------|
+| Research still running | Row visible; expand shows "research in progress" | Analyst waits — profile fills when Stage 4 completes |
+| Research failed | Row shows failed state | No profile saved — analyst can retry via **+ ADD** or manual queue |
+| Empty queue | "0 candidates" subtitle; badge hidden | Nothing to review |
+
 ---
 
 ### 4.3 Expanded company card
 
-| Component | User action | What the user sees |
-|-----------|-------------|-------------------|
-| **Company name and URL** | Read | Company identity |
-| **Source context** | Read | Which news signal triggered this entry |
-| **Deep research summary** | Read | Profile summary once research completes |
-| **No profile yet** | Read (if in progress) | Message that research is still running |
-| **On Promote** checklist | Read | Four steps that happen if the analyst promotes |
+**What the user is trying to do:** Read the deep research summary and decide whether to **Promote** this company to the Watchlist or **Dismiss** it.
+
+| Component | User action | Action type | What the user sees |
+|-----------|-------------|-------------|-------------------|
+| **Company name and URL** | Read | Read | Company identity |
+| **Source context** | Read | Read | Which news signal triggered this entry |
+| **Deep research summary** | Read | Read | Profile summary once research completes |
+| **No profile yet** | Read (if in progress) | Read | Message that research is still running |
+| **On Promote** checklist | Read | Read | Four steps that happen if the analyst promotes |
 
 **Behind the scenes:**
 
@@ -473,13 +539,22 @@ While Stages 2–3 are running, the card shows that research is still in progres
 
 `Pending review` → `Expand row` → `Read deep research summary`
 
+**Failure states:**
+
+| Condition | What the user sees | What the system does |
+|-----------|-------------------|----------------------|
+| Summary not ready | "No profile yet" message on card | Promote/Dismiss disabled or hidden until research completes |
+| Thin profile (few signals) | Short summary with low data completeness | Card still shown — analyst judges fit manually |
+
 ---
 
 ### 4.4 Promote to Watchlist
 
-| Component | User action | Outcome |
-|-----------|-------------|---------|
-| **Promote** / **Promote to Watchlist** | Click | Company accepted for monitoring |
+**What the user is trying to do:** Accept this company for ongoing monitoring — move it from Pending review onto the Watchlist.
+
+| Component | User action | Action type | Outcome |
+|-----------|-------------|-------------|---------|
+| **Promote** / **Promote to Watchlist** | Click | **Escalate** | Company accepted for monitoring |
 
 **Behind the scenes:**
 
@@ -491,13 +566,23 @@ Accepting the company writes it to the **Watchlist** and triggers a **baseline s
 
 `Expanded card` → `Promote to Watchlist (click)` → `Company enters Watchlist`
 
+**Failure states:**
+
+| Condition | What the user sees | What the system does |
+|-----------|-------------------|----------------------|
+| Research not complete | Promote button disabled | Cannot promote until profile saved |
+| Already on Watchlist | Toast or button disabled | No duplicate watchlist entry |
+| Baseline screener fails | Company on Watchlist; fit fields empty | Watchlist entry kept; screener retry planned |
+
 ---
 
 ### 4.5 Dismiss
 
-| Component | User action | Outcome |
-|-----------|-------------|---------|
-| **Dismiss** (X button) | Click | Company removed from Pending review |
+**What the user is trying to do:** Reject this company — remove it from the review queue and discard the research card.
+
+| Component | User action | Action type | Outcome |
+|-----------|-------------|-------------|---------|
+| **Dismiss** (X button) | Click | **Dismiss** | Company removed from Pending review |
 
 **Behind the scenes:**
 
@@ -508,6 +593,13 @@ This is a state change only — no engines or LLM steps run. The company is remo
 **Flow:**
 
 `Expanded card` → `Dismiss (click)` → `Company removed from queue`
+
+**Failure states:**
+
+| Condition | What the user sees | What the system does |
+|-----------|-------------------|----------------------|
+| Research still running | Dismiss may still be available | Queue entry removed; in-flight run may finish but card discarded |
+| Already dismissed | Row no longer visible | Idempotent — no duplicate action |
 
 ---
 
@@ -560,18 +652,20 @@ The **Companies** page lists every company with a saved profile. Clicking any ro
 
 ### 5.2 Company list
 
-| Component | User action | What the user sees |
-|-----------|-------------|-------------------|
-| **Watchlist** tab | Click | Promoted companies only (e.g. 4) |
-| **Companies** tab | Click | All saved companies (e.g. 10) |
-| **Search companies…** | Type | Filters the table |
-| **Table row** | Click | Opens company detailed profile |
-| **Company column** | Read | Name + website URL |
-| **Industry column** | Read | Sector (e.g. Wellness, Biotechnology) |
-| **Location column** | Read | City and country |
-| **Last Updated column** | Read | When profile or signals last changed |
-| **Actions (⋯)** | Click | Row actions menu |
-| **+ Add company** | Click | Opens bookmark modal |
+**What the user is trying to do:** Find a saved company and open its full profile — or start the manual bookmark path via **+ Add company**.
+
+| Component | User action | Action type | What the user sees |
+|-----------|-------------|-------------|-------------------|
+| **Watchlist** tab | Click | Filter | Promoted companies only (e.g. 4) |
+| **Companies** tab | Click | Filter | All saved companies (e.g. 10) |
+| **Search companies…** | Type | Filter | Filters the table |
+| **Table row** | Click | Navigate | Opens company detailed profile |
+| **Company column** | Read | Read | Name + website URL |
+| **Industry column** | Read | Read | Sector (e.g. Wellness, Biotechnology) |
+| **Location column** | Read | Read | City and country |
+| **Last Updated column** | Read | Read | When profile or signals last changed |
+| **Actions (⋯)** | Click | — | Row actions menu |
+| **+ Add company** | Click | Navigate | Opens bookmark modal |
 
 **Behind the scenes:**
 
@@ -587,13 +681,15 @@ Every company that finishes deep research (from News **+ ADD** or manual **Find 
 
 ### 5.3 Add company manually
 
-| Component | User action | What the user sets |
-|-----------|-------------|-------------------|
-| **+ Add company** | Click | "Bookmark a company" modal opens |
-| **Company name** (optional) | Type | e.g. Lumina Nicotine |
-| **Website** (optional) | Type | URL or domain — at least one field required |
-| **Find & queue** | Click | Company queued for review |
-| **Cancel** | Click | Modal closes |
+**What the user is trying to do:** Escalate a company discovered outside the News feed into deep research — same end goal as **+ ADD**, but without a triggering article.
+
+| Component | User action | Action type | What the user sets |
+|-----------|-------------|-------------|-------------------|
+| **+ Add company** | Click | Navigate | "Bookmark a company" modal opens |
+| **Company name** (optional) | Type | Configure | e.g. Lumina Nicotine |
+| **Website** (optional) | Type | Configure | URL or domain — at least one field required |
+| **Find & queue** | Click | **Escalate** | Company queued for review |
+| **Cancel** | Click | — | Modal closes |
 
 **Behind the scenes:**
 
@@ -605,24 +701,33 @@ Manual bookmark skips the News **+ ADD** path but follows the same research pipe
 
 `Companies` → `+ Add company` → `Enter name or URL` → `Find & queue` → `Pending review → Promote or Dismiss`
 
+**Failure states:**
+
+| Condition | What the user sees | What the system does |
+|-----------|-------------------|----------------------|
+| Both fields empty | Find & queue disabled | Cannot submit without name or URL |
+| Company already queued | Toast: "Already queued" | No duplicate run started |
+| Invalid URL format | Inline validation error | Submit blocked until URL corrected |
+| Deep research fails | Pending review row shows failed state | Same failure handling as §2.7 |
+
 ---
 
 ### 5.4 Company detailed profile — header and tabs
 
-Clicking any company from **Watchlist** or **Companies** opens the full profile.
+**What the user is trying to do:** Read the full deep research card and ongoing signals for one company — the single source of truth after Promote.
 
-| Component | User action | What the user sees |
-|-----------|-------------|-------------------|
-| **Breadcrumb** | Read | e.g. Companies › Ultra Pouches |
-| **Company logo + name** | Read | Identity |
-| **Fit badge** | Read | e.g. HIGH FIT |
-| **Overview** tab | Click | Key facts, description, signal timeline, market snapshot |
-| **Signals** tab | Click | Live intent signal, score trend, signal feed |
-| **People** tab | Click | Decision makers, decision map |
-| **Financials** tab | Click | Revenue, headcount, deal sizing |
-| **Timeline** tab | Click | Chronological company events |
-| **Analysis** tab | Click | Deep research analysis sections |
-| **Outreach** tab | Click | Outreach tools (when available) |
+| Component | User action | Action type | What the user sees |
+|-----------|-------------|-------------|-------------------|
+| **Breadcrumb** | Read | Read | e.g. Companies › Ultra Pouches |
+| **Company logo + name** | Read | Read | Identity |
+| **Fit badge** | Read | Read | e.g. HIGH FIT |
+| **Overview** tab | Click | Navigate | Key facts, description, signal timeline, market snapshot |
+| **Signals** tab | Click | Navigate | Live intent signal, score trend, signal feed |
+| **People** tab | Click | Navigate | Decision makers, decision map |
+| **Financials** tab | Click | Navigate | Revenue, headcount, deal sizing |
+| **Timeline** tab | Click | Navigate | Chronological company events |
+| **Analysis** tab | Click | Navigate | Deep research analysis sections |
+| **Outreach** tab | Click | Navigate | Outreach tools (when available) |
 
 **Behind the scenes:**
 
@@ -633,6 +738,14 @@ The detailed profile is built from the **Deep Research** pipeline output (§2.7.
 **Flow:**
 
 `Companies list` → `Click row` → `Company detailed profile`
+
+**Failure states:**
+
+| Condition | What the user sees | What the system does |
+|-----------|-------------------|----------------------|
+| Profile not yet saved | Redirect or empty profile | Company only appears after deep research completes |
+| Non-watchlist company | Profile static since last research | No auto-append until **Promote** (§5.8) |
+| Partial card data | Sections show "not available" | Fields without evidence left empty — not guessed |
 
 ---
 
@@ -803,17 +916,19 @@ This section explains where Hot News content comes from. It is configured separa
 
 ### 7.2 Configure a Search Cluster
 
-| Component | User action | What the user sets |
-|-----------|-------------|-------------------|
-| **Settings → Clusters** | Click | Search Clusters page opens |
-| **+ Create Cluster** | Click | Create form opens |
-| **Cluster name and description** | Type | What the cluster monitors |
-| **Priority and status** | Select / toggle | How often and whether it is active |
-| **Keywords, geography, sources** | Fill | Search scope and filters |
-| **Signal detection** | Check types | Funding, regulatory, product launch, etc. |
-| **Create Cluster** | Click | Cluster saved |
-| **Open Cluster** | Click | Cluster detail — Overview, Queries, Results, Settings tabs |
-| **+ Add Query** | Click | Adds a specific search inside the cluster |
+**What the user is trying to do:** Define what topics NORAD monitors so the right articles flow into Home News and Signals — scope before reading.
+
+| Component | User action | Action type | What the user sets |
+|-----------|-------------|-------------|-------------------|
+| **Settings → Clusters** | Click | Navigate | Search Clusters page opens |
+| **+ Create Cluster** | Click | Navigate | Create form opens |
+| **Cluster name and description** | Type | Configure | What the cluster monitors |
+| **Priority and status** | Select / toggle | Configure | How often and whether it is active |
+| **Keywords, geography, sources** | Fill | Configure | Search scope and filters |
+| **Signal detection** | Check types | Configure | Funding, regulatory, product launch, etc. |
+| **Create Cluster** | Click | Configure | Cluster saved |
+| **Open Cluster** | Click | Navigate | Cluster detail — Overview, Queries, Results, Settings tabs |
+| **+ Add Query** | Click | Configure | Adds a specific search inside the cluster |
 
 **Behind the scenes:**
 
@@ -824,6 +939,14 @@ The cluster defines monitoring scope — keywords, geography, sources, and signa
 **Flow:**
 
 `Profile menu → Settings` → `Clusters` → `Create or open cluster` → `Add queries`
+
+**Failure states:**
+
+| Condition | What the user sees | What the system does |
+|-----------|-------------------|----------------------|
+| Cluster saved with no queries | Empty Queries tab | No articles until at least one query added |
+| Cluster paused | Status shows inactive | Scheduled runs skip this cluster |
+| Scheduled runs not live | No new articles after save | Analyst waits for scheduling feature (§7.3) |
 
 ---
 
@@ -880,17 +1003,3 @@ flowchart TD
 |------|------|------|--------|
 | Author | Huzaifa | 2026-06-08 | Draft |
 | Reviewer | Shehrayar Haq | — | Pending |
-
----
-
-## 10. Revision history
-
-| Version | Date | Author | Description |
-|---------|------|--------|-------------|
-| 1.0 | 2026-06-08 | huzaifa | Initial draft |
-| 1.1 | 2026-06-08 | huzaifa | Stakeholder rewrite — starts at Home News; no admin references; UI → behind the scenes → flow → diagram |
-| 1.2 | 2026-06-08 | huzaifa | Behind the scenes — pipeline flow line + engines/LLM paragraph per section |
-| 1.3 | 2026-06-08 | huzaifa | §2.7.1 complete Deep Research tools table; §3.3 full pipeline (not Stage 3–4 only) |
-| 1.4 | 2026-06-08 | huzaifa | Home Top tab — Watchlist + Industry sections; rules/criteria pipeline; renumbered News to §2.5+ |
-| 1.5 | 2026-06-08 | huzaifa | §3 Signals page — same news as Home, categorized by rules; Pending review renumbered to §4 |
-| 1.6 | 2026-06-08 | huzaifa | §5 Companies page — list, detail profile, + Add company, watchlist-only daily auto-append |
