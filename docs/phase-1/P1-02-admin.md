@@ -416,6 +416,7 @@ An **Escalation** is an operator **choice** that moves data into the next pipeli
 | Author | Huzaifa | 2026-06-08 | Draft |
 | Reviewer | Shehrayar Haq | — | Pending |
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 
 ---
@@ -426,3 +427,5 @@ An **Escalation** is an operator **choice** that moves data into the next pipeli
 |---------|------|--------|-------------|
 | 1.0 | 2026-06-08 | huzaifa | Initial operator object definitions — GRO-267 |
 >>>>>>> f9aee15 (Phase 01 Issue 2.0 docs)
+=======
+>>>>>>> d5b1c6e (Remove revision history sections from admin and user documentation in Phase 1  p2 files.)
