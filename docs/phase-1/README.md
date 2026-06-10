@@ -34,7 +34,7 @@ All current-state claims are verified against `apps/web`, `apps/api`, and `apps/
 | P1-01-User | [Core Analyst Workflow](./P1-01-user.md) | 1.7 | Draft |
 | P1-02-Admin | [Core Product Objects — Admin Console](./P1-02-admin.md) | 1.0 | Draft |
 | P1-02-User | [Core Product Objects](./P1-02-user.md) | 1.2 | Draft |
-| P1-03 | Object Relationships | — | Not started |
+| P1-03 | [Object Relationships](./P1-03.md) | 1.0 | Draft |
 | P1-04 | Required Fields per Object | — | Not started |
 | P1-05 | UI Screen Mapping | — | Not started |
 | P1-06 | Backend Actions | — | Not started |

@@ -321,6 +321,8 @@ An **Escalation** is an analyst **choice** that moves an entity into the next pi
 
 ## 11. How objects connect (overview)
 
+Formal ownership, cardinality, and cross-UI decisions: [P1-03](./P1-03.md).
+
 Plain-language links between the main things in NORAD AI:
 
 ```mermaid
@@ -372,19 +374,3 @@ flowchart LR
 |------|------|------|--------|
 | Author | Huzaifa | 2026-06-08 | Draft |
 | Reviewer | Shehrayar Haq | — | Pending |
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-
----
-
-## 14. Revision history
-
-| Version | Date | Author | Description |
-|---------|------|--------|-------------|
-| 1.0 | 2026-06-08 | huzaifa | Initial object definitions |
-| 1.1 | 2026-06-08 | huzaifa | Stakeholder-only — removed admin/cross-UI references |
-| 1.2 | 2026-06-08 | huzaifa | Introduction rewrite — proper scope and vocabulary |
->>>>>>> f9aee15 (Phase 01 Issue 2.0 docs)
-=======
->>>>>>> d5b1c6e (Remove revision history sections from admin and user documentation in Phase 1  p2 files.)

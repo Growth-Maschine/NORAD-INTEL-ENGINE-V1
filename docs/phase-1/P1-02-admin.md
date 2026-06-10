@@ -392,6 +392,8 @@ An **Escalation** is an operator **choice** that moves data into the next pipeli
 | 7 | Run — single table for all `source_kind` values vs typed views |
 | 8 | Company — merge pin/query rows into canonical company on complete |
 
+**Answers:** [P1-03 §3](./P1-03.md#3-relationship-decisions-p1-02-11)
+
 ---
 
 ## 12. Completion checklist
@@ -415,17 +417,3 @@ An **Escalation** is an operator **choice** that moves data into the next pipeli
 |------|------|------|--------|
 | Author | Huzaifa | 2026-06-08 | Draft |
 | Reviewer | Shehrayar Haq | — | Pending |
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-
----
-
-## 14. Revision history
-
-| Version | Date | Author | Description |
-|---------|------|--------|-------------|
-| 1.0 | 2026-06-08 | huzaifa | Initial operator object definitions — GRO-267 |
->>>>>>> f9aee15 (Phase 01 Issue 2.0 docs)
-=======
->>>>>>> d5b1c6e (Remove revision history sections from admin and user documentation in Phase 1  p2 files.)
