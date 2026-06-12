@@ -4,7 +4,7 @@
 |-------|-------|
 | **Document ref** | P1-01-Admin |
 | **Title** | Core Operator Workflow — Admin Console |
-| **Version** | 2.4 |
+| **Version** | 2.5 |
 | **Status** | Draft |
 | **Last updated** | 2026-06-08 |
 
@@ -16,15 +16,15 @@ The **NORAD Intel Engine Admin Console** (`apps/web`) is where operators configu
 
 **Primary workflow (P1-01):** Web Discovery — `Cluster → Query → Run → Result → AI Analysis → Signal / Escalation`. This is the canonical operator path documented in §2.
 
-**Secondary workflow:** Today (Trend Hunter discovery) — documented in §3.
+**Deep research workflow:** Triggered from Web Discovery **Escalate** (target) or analyst actions on the user frontend — documented in §3 (includes Companies page objects).
 
-**Deep research workflow:** Triggered from Today **Profile** — documented in §4 (includes Companies page objects).
+**Supporting admin workflow:** Settings (§7) configures research engines.
 
-**Supporting admin workflows:** Discovery Clusters (§8) feeds Today; Settings (§9) configures research engines.
+**Dropped from product scope:** The **Today** page (`/discover`) and **Discovery Clusters** admin (`/discovery-clusters`) are removed from the target operator experience. Web Discovery replaces them. Legacy routes and `trend_articles` / `discovery` runs may still exist in the repo until code is removed — they are not part of this blueprint.
 
 Each workflow section uses the same format: component table → flow line → short explanation → complete pipeline diagram at the end.
 
-**Additional fields (v2.4):** Each workflow subsection may also include **What the operator is trying to do**, an **Action type** column in the component table, and a **Failure states** block before the section divider. Summary error tables (§2.11, §3.6, §4.8) are unchanged.
+**Additional fields (v2.4):** Each workflow subsection may also include **What the operator is trying to do**, an **Action type** column in the component table, and a **Failure states** block before the section divider. Summary error tables (§2.11, §3.8) are unchanged.
 
 | Block | Purpose |
 |-------|---------|
@@ -46,7 +46,7 @@ Each workflow section uses the same format: component table → flow line → sh
 | **Dismiss** | User or system removes a result from the active review queue. Distinct from **Detach/Clear** (UI-only; backend keeps running) and **Archive** (Activity panel label for a finished log — not delete). |
 | **Escalate** | User promotes a result into the next pipeline (e.g. article → deep research, or result → pending review on user frontend). |
 
-See §6 for what is implemented vs not implemented for each term.
+See §5 for what is implemented vs not implemented for each term.
 
 ---
 
@@ -223,7 +223,7 @@ Each result shows URL, title, snippet, Exa score, and optional highlights/summar
 | Dismiss result | — | **No** | No dismiss API or UI on web results |
 | Escalate result | — | **No** | No escalate to research or user frontend from results page |
 
-Implemented end point: operator reviews Exa results on the results page. See §5–§6 for full LLM and disposition matrix.
+Implemented end point: operator reviews Exa results on the results page. See §4–§5 for full LLM and disposition matrix.
 
 **Failure states:**
 
@@ -310,186 +310,56 @@ flowchart TD
 
 ---
 
-## 3. Workflow — Today (secondary)
+## 3. Workflow — Deep Research
 
 ### 3.1 Overview
 
 | Attribute | Value |
 |-----------|-------|
-| **Route** | `/discover` |
-| **Sidebar** | Today |
-| **Pipeline** | Today discovery → optional deep research |
-| **Backend** | `services/discovery.py` then `services/research.py` |
-
-Operators pick a Trend Hunter keyword cluster and date window, run AI-ranked article discovery, and optionally profile a subject company. Cluster configuration is managed on **Discovery Clusters** (`/discovery-clusters`), not on this page.
-
----
-
-### 3.2 Start a discovery run
-
-**What the operator is trying to do:** Run the Today pipeline — find and rank Trend Hunter articles for a keyword theme and date window.
-
-| Component | Action | Action type | Backend |
-|-----------|--------|-------------|---------|
-| **Discovery cluster** dropdown | Select cluster | Configure | Cluster `keywords[]` applied on run start |
-| **Published window** | Select preset or custom dates | Configure | Date bounds sent with run |
-| **Discover** button | Click | Run | `POST /api/discovery/runs` → 5-stage pipeline |
-
-**Flow:**
-
-`Sidebar → Today` → `Cluster dropdown (select)` → `Date window (select)` → `Discover (click)`
-
-**Failure states:**
-
-| Condition | What the operator sees | What the system does |
-|-----------|------------------------|----------------------|
-| No cluster selected | Discover disabled | Run not started |
-| Run already active | Button shows **Running…** | Second run blocked |
-| 5 concurrent runs | Toast error (HTTP 429) | Run rejected |
-
-
-
----
-
-### 3.3 Monitor the run
-
-**What the operator is trying to do:** Watch all five Today stages complete and confirm articles were ranked and extracted.
-
-| Component | Action | Action type | Backend |
-|-----------|--------|-------------|---------|
-| **Activity** panel | Watch timeline | Monitor | SSE `run_events` — stages 1–5 |
-| **Run group** | Expand to see progress | Monitor | Polls `runs.status` |
-
-| Stage | Engine | Output |
-|-------|--------|--------|
-| 1 — Search | Exa | Trend Hunter URLs |
-| 2 — Dedup | Database | `trend_articles` |
-| 3 — Rank | Claude Haiku 4.5 | `relevance_score` |
-| 4 — Contents | Exa | Article bodies |
-| 5 — Extract | Claude Sonnet 4.5 | `summary`, `extracted_companies` |
-
-**Flow:**
-
-`Discover (click)` → `Activity panel (watch)` → `Run group expands (auto)`
-
----
-
-### 3.4 Review results and start research
-
-**What the operator is trying to do:** Review ranked articles and **escalate** the primary company into deep research — the main action on Today after discovery completes.
-
-| Component | Action | Action type | Backend |
-|-----------|--------|-------------|---------|
-| **Article card** | Review ranked article | Read | `trend_articles` (`status = extracted`) |
-| **Profile** button | Click primary company | Escalate | `POST /api/research/runs` → deep research |
-| **Countdown banner** | Wait or Go now | Navigate | Navigates to `/companies` |
-
-**Flow:**
-
-`Run group (expand)` → `Article card (review)` → `Profile (click)` → `Start research (confirm)` → `Companies`
-
-Clicking **Profile** escalates the primary company into deep research (§4). **Detach/Clear** only stops UI tracking — it does not dismiss articles. **Archive** on the Activity panel is a label for a finished log, not delete. Article dismiss exists as API only (`POST /api/discovery/articles/:id/dismiss`) with **no button** on cards.
-
-**Failure states:**
-
-| Condition | What the operator sees | What the system does |
-|-----------|------------------------|----------------------|
-| Sonnet extract fails (one article) | Warning in Activity log | Article skipped; not shown on cards; run continues |
-| Haiku rank fails (whole batch) | Toast + error banner | Entire run fails — no auto-retry |
-| Article dismiss | No button on cards | API exists only — not exposed in UI |
-
-
-
----
-
-### 3.5 Complete pipeline diagram — Today
-
-```mermaid
-flowchart TD
-    START([Operator opens Today]) --> NAV[Sidebar → Today]
-    NAV --> PICK[Select discovery cluster]
-    PICK --> DATE[Set published window]
-    DATE --> DISCOVER[Click Discover]
-    DISCOVER --> API[POST /api/discovery/runs]
-
-    API --> S1[Stage 1 · Exa search Trend Hunter]
-    S1 --> S2[Stage 2 · Dedup]
-    S2 --> S3[Stage 3 · Claude Haiku rank]
-    S3 --> S4[Stage 4 · Exa contents]
-    S4 --> S5[Stage 5 · Claude Sonnet extract]
-    S5 --> DONE[Run completed]
-
-    DONE --> REVIEW[Review article cards]
-    REVIEW --> PROFILE{Profile clicked?}
-    PROFILE -->|No| END([Stay on Today])
-    PROFILE -->|Yes| RESEARCH[POST /api/research/runs]
-    RESEARCH --> COMPANIES[Navigate to Companies]
-```
-
----
-
-### 3.6 Errors, fallbacks, and limits
-
-*Summary table — per-step failure states are in §3.2–3.4 above.*
-
-| Condition | Backend behaviour | UI response |
-|-----------|-------------------|-------------|
-| Haiku rank fails (whole batch) | Run `failed` — no auto-retry | Toast + error banner |
-| Sonnet extract fails (one article) | Article skipped; run continues | Warning in Activity log; article not on cards |
-| No cluster selected | — | Discover disabled |
-| Run already active | — | Button shows **Running…** |
-| 5 concurrent runs | HTTP 429 | Toast error |
-
----
-
-## 4. Workflow — Deep Research
-
-### 4.1 Overview
-
-| Attribute | Value |
-|-----------|-------|
-| **Entry (admin)** | **Profile** button on Today article card |
-| **Routes** | `/companies`, `/companies/:id`, `/runs/:id` |
+| **Entry (admin, target)** | **Escalate** on Web Discovery search result (§2.7 — not implemented) |
+| **Entry (admin, monitor)** | `/companies`, `/companies/:id`, `/runs/:id` |
+| **Entry (analyst)** | **+ ADD** on News article, **Find & queue** manual bookmark — [P1-01-User](./P1-01-user.md) |
 | **Pipeline** | Deep research (`source_kind = research`) |
 | **Backend** | `services/research.py` |
 | **Output** | `CompanyCardV1` in `companies`, `cards`, `signals`, `sources` |
 
-Deep research builds a structured company profile from web evidence. On the admin console it is started from Today, not from Web Discovery results.
+Deep research builds a structured company profile from web evidence. On the admin console the target entry path is Web Discovery escalation; the Companies page is where operators monitor runs and read completed profiles.
 
 ---
 
-### 4.2 Start research from Today
+### 3.2 Start research from Web Discovery (target)
 
-**What the operator is trying to do:** Confirm deep research on the primary company from a Today article — escalate from discovery to full company profile.
+**What the operator is trying to do:** Escalate a promising Exa hit from Web Discovery results into a full company profile run.
 
 | Component | Action | Action type | Backend |
 |-----------|--------|-------------|---------|
-| **Profile** button | Click beside article card | Escalate | Opens confirmation modal |
-| **Start research** | Confirm in modal | Escalate | `POST /api/research/runs` with `{ company_name, trend_article_id }` |
-| **Countdown banner** | Wait 3 s or **Go now** | Navigate | Navigates to `/companies` |
+| **Escalate** button on search result | Click | Escalate | Opens confirmation modal |
+| **Start research** | Confirm in modal | Escalate | `POST /api/research/runs` with `{ company_name, domain?, source_run_id, result_url }` |
+| Post-confirm navigation | Auto or **Go now** | Navigate | Navigates to `/companies` |
 
 **Flow:**
 
-`Today → Article card → Profile (click) → Start research (confirm) → Companies page`
+`Web Discovery → Results page → Escalate (click) → Start research (confirm) → Companies page`
 
-The research run starts immediately on confirm. The countdown only controls navigation timing — cancelling it keeps the operator on Today while research continues.
+**Status:** Not implemented — target end state for §2. Until built, deep research is triggered from the analyst frontend or via API.
 
 **Failure states:**
 
 | Condition | What the operator sees | What the system does |
 |-----------|------------------------|----------------------|
+| Escalate not implemented | No button on results page | Operator uses analyst +ADD or API |
 | 5 concurrent research runs | Toast error (HTTP 429) | Run rejected until slot free |
 | Research already running for company | Existing row shows **Profiling…** | New run may queue or coalesce per API rules |
 
 ---
 
-### 4.3 Companies page — browse and monitor
+### 3.3 Companies page — browse and monitor
 
 **What the operator is trying to do:** Monitor in-flight research runs and open completed company profiles.
 
 | Component | Action | Action type | Backend |
 |-----------|--------|-------------|---------|
-| **Activity** panel (left) | Watch timeline for focused company | Monitor | SSE `run_events`; shows stages, costs, synthesis retry events (§5.1) |
+| **Activity** panel (left) | Watch timeline for focused company | Monitor | SSE `run_events`; shows stages, costs, synthesis retry events (§4.1) |
 | **Company row** (collapsed) | Click row header | Navigate | Expands excerpt; Activity panel switches to that company's latest run |
 | **Status pill** | Read | Read | `Profiling…` (live), `Done` (completed), or `failed` / `cancelled` |
 | **Overall score** | Read (right side) | Read | From completed Company Card |
@@ -503,7 +373,7 @@ On load: `GET /api/research/feed`. Live rows poll every 3 s; completed rows ever
 
 ---
 
-### 4.4 Expanded company row — objects and actions
+### 3.4 Expanded company row — objects and actions
 
 **What the operator is trying to do:** Read the research excerpt, open the full profile or run log, or cancel a live run.
 
@@ -526,12 +396,12 @@ On load: `GET /api/research/feed`. Live rows poll every 3 s; completed rows ever
 | Condition | What the operator sees | What the system does |
 |-----------|------------------------|----------------------|
 | Run cancelled | Row shows `cancelled` | No card saved from that run |
-| Run failed | Row shows `failed` | No card saved — operator may re-run Profile |
+| Run failed | Row shows `failed` | No card saved — operator may re-escalate from Web Discovery |
 | Card excerpt loading | Spinner on expand | Lazy-load via `GET /api/research/companies/:id` |
 
 ---
 
-### 4.5 Company detail page (`/companies/:id`)
+### 3.5 Company detail page (`/companies/:id`)
 
 **What the operator is trying to do:** Read the full company profile — strategic fit, signals, sources, and research evidence.
 
@@ -553,7 +423,7 @@ On load: `GET /api/research/feed`. Live rows poll every 3 s; completed rows ever
 
 ---
 
-### 4.6 Run log page (`/runs/:id`)
+### 3.6 Run log page (`/runs/:id`)
 
 **What the operator is trying to do:** Monitor or review a single research run's pipeline stages and activity log.
 
@@ -570,20 +440,20 @@ On load: `GET /api/research/feed`. Live rows poll every 3 s; completed rows ever
 
 | Stage | Engine | What happens |
 |-------|--------|--------------|
-| 1 — Build input | Application | Loads trend article context if provided |
+| 1 — Build input | Application | Loads source context if provided (search result URL, article provenance) |
 | 2 — Fan-out | Parallel + Exa + Diffbot | Structured brief, web content, entity record |
-| 3 — Synthesize | Claude Sonnet 4.5 | Company Card + signals; fallbacks in §5.1 |
+| 3 — Synthesize | Claude Sonnet 4.5 | Company Card + signals; fallbacks in §4.1 |
 | 4 — Persist | Application | Writes `companies`, `cards`, `signals`, `sources` |
 
 ---
 
-### 4.7 Complete pipeline diagram — Deep Research
+### 3.7 Complete pipeline diagram — Deep Research
 
 ```mermaid
 flowchart TD
-    START([Profile clicked on Today]) --> CONFIRM[Confirm Start research]
+    START([Escalate from Web Discovery]) --> CONFIRM[Confirm Start research]
     CONFIRM --> API[POST /api/research/runs]
-    API --> S1[Stage 1 · Build input + trend context]
+    API --> S1[Stage 1 · Build input + source context]
     S1 --> S2[Stage 2 · Parallel + Exa + Diffbot fan-out]
     S2 --> S3[Stage 3 · Claude Sonnet synthesize CompanyCardV1 + signals]
     S3 --> S4[Stage 4 · Persist company / card / signals / sources]
@@ -597,54 +467,34 @@ flowchart TD
 
 ---
 
-### 4.8 Errors, fallbacks, and limits
+### 3.8 Errors, fallbacks, and limits
 
-*Summary table — per-step failure states are in §4.2–4.4 above.*
+*Summary table — per-step failure states are in §3.2–3.4 above.*
 
 | Condition | Backend behaviour | UI response |
 |-----------|-------------------|-------------|
 | One engine fails in Stage 2 | Run continues with other engines | Activity shows partial OK/FAIL |
 | All engines fail in Stage 2 | Run `failed`; no card saved | Error in Activity; failed status on row |
-| Thin signals after synth | Auto-retry Claude once (§5.1) | `synthesis_retry` events in Activity |
+| Thin signals after synth | Auto-retry Claude once (§4.1) | `synthesis_retry` events in Activity |
 | Validation fails after coerce | Run `failed`; no orphan card | Error in Activity |
 | 5 concurrent research runs | HTTP 429 | Toast error |
 | User cancels run | `cancelled`; no card from that run | Row shows cancelled |
 
 ---
 
-## 5. LLM processing by pipeline
+## 4. LLM processing by pipeline
 
 Any row below counts as **AI analyzes results** per §1.1.
 
 | Pipeline | Stage | LLM | What it does | Persisted to |
 |----------|-------|-----|--------------|--------------|
-| Today | 3 — Rank | Claude Haiku 4.5 | Grades articles 0–100; keeps top 15 | `trend_articles.relevance_score`, `relevance_reason` |
-| Today | 5 — Extract | Claude Sonnet 4.5 | Summary + company names from article body | `trend_articles.summary`, `extracted_companies` |
-| Web Discovery | Post-run | — | **No NORAD LLM** (Exa vendor summaries only) | `runs.engine_outputs` |
+| Web Discovery | Post-run | — | **No NORAD LLM today** (Exa vendor summaries only) | `runs.engine_outputs` |
+| Web Discovery | Post-run (target) | Claude (TBD) | Rank, summarise, extract signals from Exa hits | `runs.engine_outputs` or child rows — **planned** |
 | Deep Research | 3 — Synthesize | Claude Sonnet 4.5 | Full Company Card + signal extraction | `cards.card`, `signals` |
 
-**Non-LLM filtering (not AI analysis):**
-
-| Pipeline | Mechanism | What it does |
-|----------|-----------|--------------|
-| Today | Topic keyword filter (Stage 1) | Hard-coded exclusions (cannabis, psychedelic, etc.) — drops before DB |
-| Today | Top-N cutoff (Stage 3) | Keeps top 15 after Haiku rank — lower scores not read/extracted |
-
-### 5.1 AI failure and fallback behaviour
+### 4.1 AI failure and fallback behaviour
 
 When an LLM or AI step fails, the pipeline may **skip**, **fall back to other engines**, **deterministically backfill**, or **auto-retry** — depending on the stage. There is no generic retry on every Claude call.
-
-#### Today discovery
-
-| Stage | If AI / step fails | Fallback behaviour |
-|-------|-------------------|-------------------|
-| 3 — Haiku rank (whole batch) | Claude call fails or returns no tool output | **Entire run fails** — no auto-retry |
-| 3 — Haiku rank (per article) | Article omitted from Haiku response | Article **skipped** — not ranked, not kept in top 15 |
-| 4 — Exa contents | Exa API error | **Entire run fails** |
-| 4 — Exa contents (per URL) | URL missing from response | Article **skipped** — no body text |
-| 5 — Sonnet extract (per article) | Claude call fails for one article | Article **skipped** with warning in Activity log; **run continues** for other articles. Failed article stays at `read`, not shown on Today cards |
-
-There is **no automatic re-call** of Claude for a failed Today extract. The operator must start a new Discover run.
 
 #### Deep research
 
@@ -668,52 +518,51 @@ Activity panel events for research fallbacks include: `sources_backfilled`, `sig
 
 ---
 
-## 6. Save, dismiss, and escalate — what exists today
+## 5. Save, dismiss, and escalate — what exists today
 
 Automatic persistence (pipeline writes to DB) is **not** the same as a user **Save** action.
 
-| Action | Web Discovery | Today | Deep Research |
-|--------|---------------|-------|---------------|
-| **Auto-persist results** | Yes — `runs.engine_outputs` | Yes — `trend_articles` | Yes — `companies`, `cards`, `signals`, `sources` |
-| **User Save / bookmark** | No UI, no API | No UI, no API | No UI, no API |
-| **User Dismiss** | No UI, no API | API only: `POST .../articles/:id/dismiss` sets `status=dismissed` — **no button on article cards** | N/A |
-| **LLM dismissing results** | No | No — Haiku ranks/scores but does not mark `dismissed`; topic filter is rule-based not LLM | No |
-| **User Escalate** | No — cannot promote a web result to research from results page | Yes — **Profile** → deep research pipeline | N/A (this is the escalation target) |
-| **Detach / Clear (Today)** | — | UI only — stops watching run; does **not** dismiss articles | — |
-| **Archive (Activity label)** | Label on finished log | Label on finished log | Label on finished log — **not** delete or dismiss |
+| Action | Web Discovery | Deep Research |
+|--------|---------------|---------------|
+| **Auto-persist results** | Yes — `runs.engine_outputs` | Yes — `companies`, `cards`, `signals`, `sources` |
+| **User Save / bookmark** | No UI, no API | No UI, no API |
+| **User Dismiss** | No UI, no API | N/A |
+| **LLM dismissing results** | No | No |
+| **User Escalate** | **Not implemented** — target: result → deep research (§3.2) | N/A (this is the escalation target) |
+| **Archive (Activity label)** | Label on finished log | Label on finished log — **not** delete or dismiss |
 
 **Answer — Can results be saved, dismissed, or escalated?**
 
 - **Saved by user:** No explicit save/bookmark action exists on any admin screen. Data is saved automatically by pipelines only.
-- **Dismissed:** Only Today articles via API; no UI button. No dismiss on Web Discovery results. No LLM-driven dismiss.
-- **Escalated:** Only via Today **Profile** → deep research. Web Discovery has no escalate path on admin console. User frontend escalate (e.g. Pending review) is documented in P1-01-User.
+- **Dismissed:** No dismiss on Web Discovery results today. No LLM-driven dismiss.
+- **Escalated:** Target path is Web Discovery **Escalate** → deep research (§3.2, not implemented). Analyst frontend escalate (+ADD, manual bookmark) is documented in [P1-01-User](./P1-01-user.md).
 
 ---
 
-## 7. P1-01 document completion
+## 6. P1-01 document completion
 
 This section records deliverable coverage for the core workflow specification.
 
-### 7.1 Primary user outcome
+### 6.1 Primary user outcome
 
-Operators configure web search scope (clusters and queries), execute Exa searches, and review results to identify market signal. On Today, operators additionally funnel Trend Hunter articles into company research.
+Operators configure web search scope (clusters and queries), execute Exa searches, review results to identify market signal, and escalate promising hits into deep research (target).
 
-### 7.2 Required flow coverage
+### 6.2 Required flow coverage
 
-| Required step | Web Discovery | Today | Deep Research |
-|---------------|---------------|-------|---------------|
-| Login | Not implemented (single-user) | Same | Same |
-| Create search cluster | Implemented | Uses pre-configured clusters | — |
-| Add search queries | Implemented | — | — |
-| Run query or cluster | Implemented | Discover run | — |
-| View results | Results page | Article cards | Company Card page |
-| AI analyzes results | **No NORAD LLM** | Haiku rank + Sonnet extract | Sonnet synthesis + signals |
-| Review signals | Not implemented | Scores + extracted companies | Signals on company page |
-| User save | Not implemented | Not implemented | Not implemented |
-| User dismiss | Not implemented | API only, no UI | — |
-| Escalate | Not implemented | Profile → research | Is the escalation target |
+| Required step | Web Discovery | Deep Research |
+|---------------|---------------|---------------|
+| Login | Not implemented (single-user) | Same |
+| Create search cluster | Implemented | — |
+| Add search queries | Implemented | — |
+| Run query or cluster | Implemented | — |
+| View results | Results page | Company Card page |
+| AI analyzes results | **No NORAD LLM** (target: post-run LLM planned) | Sonnet synthesis + signals |
+| Review signals | Not implemented (target) | Signals on company page |
+| User save | Not implemented | Not implemented |
+| User dismiss | Not implemented | — |
+| Escalate | **Not implemented** (target: result → research) | Is the escalation target |
 
-### 7.3 Screens involved
+### 6.3 Screens involved
 
 | Screen | Route | Workflow |
 |--------|-------|----------|
@@ -721,102 +570,40 @@ Operators configure web search scope (clusters and queries), execute Exa searche
 | Cluster command center | `/discover-web/clusters/:id` | Primary |
 | Query editor | `.../queries/new` or `.../queries/:id` | Primary |
 | Query results | `.../queries/:id/results` | Primary |
-| Today | `/discover` | Secondary |
-| Discovery Clusters | `/discovery-clusters` | Today keyword admin (§8) |
-| Companies | `/companies`, `/companies/:id` | Deep research output (§4.3–4.5) |
-| Run log | `/runs/:id` | Research event stream (§4.6) |
-| Settings | `/settings` | Engine config (§9) |
+| Companies | `/companies`, `/companies/:id` | Deep research output (§3.3–3.5) |
+| Run log | `/runs/:id` | Research event stream (§3.6) |
+| Settings | `/settings` | Engine config (§7) |
 
-### 7.4 Checklist answers
+**Dropped screens (legacy in repo):** Today (`/discover`), Discovery Clusters (`/discovery-clusters`).
+
+### 6.4 Checklist answers
 
 | Question | Answer |
 |----------|--------|
 | Can users run a single query, or only a full cluster? | **Both** on Web Discovery. |
-| Can results be saved, dismissed, or escalated? | See §6. No user save anywhere. Dismiss: API only on Today articles (no UI). Escalate: Today Profile only on admin. |
-| What is AI analysis? | Any in-pipeline LLM step (§5). Web Discovery has none; Today and Research do. |
+| Can results be saved, dismissed, or escalated? | See §5. No user save anywhere. Escalate: target Web Discovery → research (not implemented). |
+| What is AI analysis? | Any in-pipeline LLM step (§4). Web Discovery has none today; Deep Research does. |
 | What happens when a run fails? | Toast + error; `runs.status = failed`; operator can re-run. |
-| What happens when AI analysis fails? | See §5.1. **Today:** per-article extract failure skips that article and continues; whole-batch rank failure fails the run. **Research:** engine partial-failure tolerated; deterministic backfill + optional Claude retry-on-thin signals; hard validation failure fails the run. |
+| What happens when AI analysis fails? | See §4.1. **Research:** engine partial-failure tolerated; deterministic backfill + optional Claude retry-on-thin signals; hard validation failure fails the run. |
 
-### 7.5 Completion status
+### 6.5 Completion status
 
 | Requirement | Status |
 |-------------|--------|
 | Primary workflow (Web Discovery) | Documented (§2) |
 | Alternate paths | Documented (§2.10) |
-| Today workflow + LLM stages | Documented (§3) |
-| Deep research + Companies UI guide | Documented (§4) |
-| Discovery Clusters workflow | Documented (§8) |
-| Settings workflow | Documented (§9) |
-| LLM inventory (AI analysis definition) | Documented (§5) |
-| Save / dismiss / escalate — actual behaviour | Documented (§6) |
+| Deep research + Companies UI guide | Documented (§3) |
+| Settings workflow | Documented (§7) |
+| LLM inventory (AI analysis definition) | Documented (§4) |
+| Save / dismiss / escalate — actual behaviour | Documented (§5) |
 | User frontend perspective | Documented — [P1-01-User](./P1-01-user.md) v1.0 (primary flow) |
 | Admin doc approved | **Pending** reviewer sign-off |
 
 ---
 
-## 8. Workflow — Discovery Clusters
+## 7. Workflow — Settings
 
-Discovery Clusters administers the keyword libraries used by the **Today** page. Distinct from Web Discovery clusters (`discovery_clusters` vs `web_discovery_clusters`).
-
-### 8.1 Overview
-
-| Attribute | Value |
-|-----------|-------|
-| **Route** | `/discovery-clusters` |
-| **Sidebar** | Discovery Clusters |
-| **Feeds** | Today page cluster dropdown only |
-
----
-
-### 8.2 Manage clusters
-
-**What the operator is trying to do:** Maintain keyword themes that feed the Today page cluster dropdown — scope before running **Discover**.
-
-| Component | Action | Action type | Backend |
-|-----------|--------|-------------|---------|
-| **New cluster** | Click | Navigate | Opens create dialog |
-| **Cluster card → Edit** | Click | Navigate | Opens edit dialog with existing values |
-| **Cluster card → Make default** | Click | Configure | `PUT /api/discovery/clusters/:id` with `is_default: true` |
-| **Cluster card → Delete** | Click → confirm | Configure | `DELETE /api/discovery/clusters/:id` |
-| **Create / Save changes** (dialog) | Submit form | Configure | `POST` or `PUT /api/discovery/clusters` |
-
-**Form fields:** name, group, description, keywords (comma or newline), Enabled checkbox, Set as default checkbox.
-
-**Flow:**
-
-`Sidebar → Discovery Clusters` → `New cluster (click)` → `Fill form (submit)` → cluster appears in library
-
-**Flow (edit Today scope):**
-
-`Discovery Clusters` → `Edit (click)` → `Update keywords / enabled (save)` → changes apply on next **Discover** on Today
-
-Deleting a cluster removes it from the Today dropdown. Existing `trend_articles` and past runs are unaffected. If the default cluster is deleted, the next cluster by `sort_order` is promoted.
-
-**Failure states:**
-
-| Condition | What the operator sees | What the system does |
-|-----------|------------------------|----------------------|
-| Delete default cluster | Confirm dialog | Next cluster by `sort_order` promoted as default |
-| Empty keywords on save | Validation error | Cluster not saved |
-| Disabled cluster | Not in Today dropdown | Discover skips that cluster |
-
-
-
----
-
-### 8.3 End-to-end flow
-
-**Flow:**
-
-`Discovery Clusters` → `Create or edit cluster` → `Today page` → `Cluster dropdown shows updated list` → `Discover (click)`
-
-Operators maintain keyword themes here; Today only shows cluster names — keywords are applied server-side on each discovery run.
-
----
-
-## 9. Workflow — Settings
-
-### 9.1 Overview
+### 7.1 Overview
 
 | Attribute | Value |
 |-----------|-------|
@@ -826,7 +613,7 @@ Operators maintain keyword themes here; Today only shows cluster names — keywo
 
 ---
 
-### 9.2 System status
+### 7.2 System status
 
 **What the operator is trying to do:** Confirm Postgres and Redis are reachable before running pipelines.
 
@@ -837,7 +624,7 @@ Operators maintain keyword themes here; Today only shows cluster names — keywo
 
 ---
 
-### 9.3 Research engine configuration
+### 7.3 Research engine configuration
 
 **What the operator is trying to do:** Tune Parallel, Exa, and Diffbot settings so the next deep research run uses the right cost/quality trade-off.
 
@@ -870,15 +657,15 @@ Changes apply to the **next** research run, not runs already in flight. In produ
 
 ---
 
-### 9.4 End-to-end flow
+### 7.4 End-to-end flow
 
 **Flow:**
 
-`Settings` → `Tune Parallel / Exa / Diffbot` → `Save changes` → `Today Profile or research API` → `Next run uses new config`
+`Settings` → `Tune Parallel / Exa / Diffbot` → `Save changes` → `Next deep research run uses new config`
 
 ---
 
-## 10. Additional admin screens
+## 8. Additional admin screens
 
 | Screen | Route | Status |
 |--------|-------|--------|
@@ -886,7 +673,7 @@ Changes apply to the **next** research run, not runs already in flight. In produ
 
 ---
 
-## 11. Approval
+## 9. Approval
 
 | Role | Name | Date | Status |
 |------|------|------|--------|

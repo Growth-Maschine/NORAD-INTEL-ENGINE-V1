@@ -4,7 +4,7 @@
 |-------|-------|
 | **Document ref** | P1-02-Admin |
 | **Title** | Core Product Objects — Operator Console |
-| **Version** | 1.0 |
+| **Version** | 1.1 |
 | **Status** | Draft |
 | **Last updated** | 2026-06-08 |
 | **Audience** | Internal developers, operators |
@@ -33,7 +33,9 @@ It is the operator-facing half of **P1-02**. Analyst-application objects (Articl
 
 **AI Analysis** — §2 — is any LLM step in a pipeline, not a standalone persisted row type.
 
-Relationships are flagged for P1-03 — not answered here.
+Relationships are answered in [P1-03](./P1-03.md).
+
+**Dropped from product scope:** Today page (`/discover`), Discovery Clusters admin (`/discovery-clusters`), and their objects (`discovery_clusters`, `trend_articles`, `runs` · `discovery`) are legacy — not part of the target admin model. Web Discovery is the operator discovery path.
 
 ---
 
@@ -43,16 +45,14 @@ Relationships are flagged for P1-03 — not answered here.
 |-----------|-------|
 | **What** | Any pipeline step where Claude (Haiku or Sonnet) ranks, extracts, synthesises, or interprets data |
 | **Why** | Converts raw Exa/Parallel/Diffbot output into scored articles, company cards, and signals |
-| **Example** | Haiku ranks 30 Trend Hunter candidates to top 15; Sonnet synthesises `CompanyCardV1` after engine fan-out |
+| **Example** | Sonnet synthesises `CompanyCardV1` after engine fan-out; future Web Discovery post-run rank/summary |
 | **Not confused with** | Exa vendor `summary`/`highlights` — vendor-side, not NORAD LLM |
 | **Backend** | Logged in `engine_calls` where `vendor = anthropic` |
-| **Status** | Available on Today and Deep Research; **not** on Web Discovery post-run today |
+| **Status** | Available on Deep Research; **not** on Web Discovery post-run today (planned) |
 
 | Pipeline | Stage | Model | Persisted to |
 |----------|-------|-------|--------------|
-| Today discovery | Rank | Claude Haiku 4.5 | `trend_articles.relevance_score` |
-| Today discovery | Extract | Claude Sonnet 4.5 | `trend_articles.summary`, `extracted_companies` |
-| Web Discovery | Post-run | — | No NORAD LLM (Exa only) |
+| Web Discovery | Post-run | — | No NORAD LLM today (Exa only) — **planned** |
 | Deep Research | Synthesise | Claude Sonnet 4.5 | `cards.card`, `signals` |
 
 ---
@@ -67,19 +67,15 @@ Relationships are flagged for P1-03 — not answered here.
 | 3.4 | Web Discovery Query | One Exa search in a cluster | `web_discovery_queries` | Available |
 | 3.5 | Web Discovery Query Run | One execution of web discovery | `runs` · `web_discovery` | Available |
 | 3.6 | Search Result | One Exa hit from a query run | `runs.engine_outputs` | Available |
-| 3.7 | Discovery Cluster | Today keyword cluster | `discovery_clusters` | Available |
-| 3.8 | Today Discovery Run | One Today pipeline execution | `runs` · `discovery` | Available |
-| 3.9 | Trend Article | One article from Today pipeline | `trend_articles` | Available |
-| 3.10 | Deep Research Run | One company profiling execution | `runs` · `research` | Available |
-| 3.11 | Company | Canonical company entity | `companies` | Available |
-| 3.12 | Company Card | Versioned research profile blob | `cards` | Available |
-| 3.13 | Research Signal | Structured signal on a card | `signals` | Available |
-| 3.14 | Source | Citation backing card fields | `sources` | Available |
-| 3.15 | Run Event | Pipeline stage log line | `run_events` | Available |
-| 3.16 | Engine Call | One vendor API call audit row | `engine_calls` | Available |
-| 3.17 | Research Config | Engine settings in app_kv | `app_kv` | Available |
-| 3.18 | Profile Escalation | Today article → deep research | via `runs` | Available |
-| 3.19 | Article Dismissal | Remove trend article from queue | `trend_articles.status` | Partial |
+| 3.7 | Deep Research Run | One company profiling execution | `runs` · `research` | Available |
+| 3.8 | Company | Canonical company entity | `companies` | Available |
+| 3.9 | Company Card | Versioned research profile blob | `cards` | Available |
+| 3.10 | Research Signal | Structured signal on a card | `signals` | Available |
+| 3.11 | Source | Citation backing card fields | `sources` | Available |
+| 3.12 | Run Event | Pipeline stage log line | `run_events` | Available |
+| 3.13 | Engine Call | One vendor API call audit row | `engine_calls` | Available |
+| 3.14 | Research Config | Engine settings in app_kv | `app_kv` | Available |
+| 3.15 | Web Result Escalation | Search result → deep research | via `runs` | Not implemented |
 
 ---
 
@@ -120,7 +116,6 @@ Relationships are flagged for P1-03 — not answered here.
 | **Why** | Operators scope market intelligence by theme |
 | **Example** | “Pouches” — keywords, geography, sources, signal priorities, paused/active |
 | **Not confused with** | **Search Cluster** on analyst Settings ([P1-02-User §5.1](./P1-02-user.md)) — different UI label |
-| **Not confused with** | **Discovery Cluster** (§6.1) — Today Trend Hunter keywords |
 | **Backend** | `web_discovery_clusters` |
 | **Where in UI** | `/discover-web` — list and command center |
 | **Status** | Available |
@@ -144,7 +139,7 @@ Relationships are flagged for P1-03 — not answered here.
 | **What** | One execution of one or all active queries in a cluster |
 | **Why** | Produces fresh Exa hits for operator review |
 | **Example** | **Run Query** on June 5 — single query; **Run All** — batch |
-| **Not confused with** | **Today Discovery Run** (§6.2) or **Deep Research Run** (§7.1) |
+| **Not confused with** | **Deep Research Run** (§6.1) |
 | **Backend** | `runs` where `source_kind = web_discovery` |
 | **Where in UI** | Activity log → Results page; run selector for history |
 | **Status** | Available |
@@ -157,67 +152,22 @@ Relationships are flagged for P1-03 — not answered here.
 | **Why** | Raw material operators review before any analyst escalation |
 | **Example** | PitchBook article URL, title, snippet, Exa score, highlights |
 | **Not confused with** | **Article** on analyst News feed ([P1-02-User §5.3](./P1-02-user.md)) — enriched, scored news row |
-| **Not confused with** | **Trend Article** — from Today pipeline |
 | **Backend** | Slice of `runs.engine_outputs` per query |
 | **Where in UI** | Web Discovery results page |
 | **Status** | Available — post-run NORAD LLM not implemented |
 
 ---
 
-## 6. Today discovery objects
+## 6. Deep research objects
 
-### 6.1 Discovery Cluster
-
-| | |
-|--|--|
-| **What** | Keyword cluster for Trend Hunter discovery on the Today page |
-| **Why** | Operators pick a topic theme before running daily article discovery |
-| **Example** | “Nicotine alternatives” — `keywords[]` applied on Discover |
-| **Not confused with** | **Web Discovery Cluster** (§5.1) |
-| **Backend** | `discovery_clusters` |
-| **Where in UI** | `/discovery-clusters` management; Today dropdown |
-| **Status** | Available |
-
-### 6.2 Today Discovery Run
-
-| | |
-|--|--|
-| **What** | One five-stage Today pipeline execution |
-| **Why** | Surfaces ranked Trend Hunter articles with extracted companies |
-| **Example** | Discover for cluster + date window → 15 ranked articles with summaries |
-| **Not confused with** | **Web Discovery Query Run** — Exa-only cluster search |
-| **Backend** | `runs` + `services/discovery.py` · `source_kind = discovery` |
-| **Where in UI** | Today → Discover → Activity panel |
-| **Status** | Available |
-
-**Pipeline stages (reference):**
-
-`Exa search` → `dedup` → `Haiku rank` → `Exa contents` → `Sonnet extract companies`
-
-### 6.3 Trend Article
-
-| | |
-|--|--|
-| **What** | One article surfaced and enriched by a Today Discovery Run |
-| **Why** | Daily inbox of candidates operators can profile |
-| **Example** | Trend Hunter URL — relevance 87, summary, `extracted_companies` JSON |
-| **Not confused with** | **Search Result** (Web Discovery raw hit) or analyst **Article** |
-| **Backend** | `trend_articles` — statuses: discovered → ranked → read → extracted → dismissed / researched |
-| **Where in UI** | Today article cards; Activity log |
-| **Status** | Available |
-
----
-
-## 7. Deep research objects
-
-### 7.1 Deep Research Run
+### 6.1 Deep Research Run
 
 | | |
 |--|--|
 | **What** | One four-stage company profiling execution |
 | **Why** | Produces one `CompanyCardV1` per target company |
-| **Example** | Profile click on primary company from Today card |
-| **Not confused with** | **Web Discovery Query Run** or **Today Discovery Run** |
+| **Example** | Escalate from Web Discovery search result (target) or analyst +ADD |
+| **Not confused with** | **Web Discovery Query Run** |
 | **Backend** | `runs` + `services/research.py` · `source_kind = research` |
 | **Where in UI** | Activity panel; `/runs/:id`; Companies profile history |
 | **Status** | Available |
@@ -226,7 +176,7 @@ Relationships are flagged for P1-03 — not answered here.
 
 `Build input` → `Parallel + Exa + Diffbot fan-out` → `Sonnet synthesise` → `persist company/card/signals/sources`
 
-### 7.2 Company
+### 6.2 Company
 
 | | |
 |--|--|
@@ -238,7 +188,7 @@ Relationships are flagged for P1-03 — not answered here.
 | **Where in UI** | `/companies` list and detail |
 | **Status** | Available |
 
-### 7.3 Company Card
+### 6.3 Company Card
 
 | | |
 |--|--|
@@ -250,7 +200,7 @@ Relationships are flagged for P1-03 — not answered here.
 | **Where in UI** | Company detail sections; Research Evidence |
 | **Status** | Available |
 
-### 7.4 Research Signal
+### 6.4 Research Signal
 
 | | |
 |--|--|
@@ -262,7 +212,7 @@ Relationships are flagged for P1-03 — not answered here.
 | **Where in UI** | Company detail → Signals section |
 | **Status** | Available |
 
-### 7.5 Source
+### 6.5 Source
 
 | | |
 |--|--|
@@ -275,9 +225,9 @@ Relationships are flagged for P1-03 — not answered here.
 
 ---
 
-## 8. Pipeline infrastructure objects
+## 7. Pipeline infrastructure objects
 
-### 8.1 Run Event
+### 7.1 Run Event
 
 | | |
 |--|--|
@@ -285,10 +235,10 @@ Relationships are flagged for P1-03 — not answered here.
 | **Why** | Live Activity feed and post-run audit |
 | **Example** | `Stage 2 — Parallel OK ($2.500), Exa 5 reads ($0.028)` |
 | **Backend** | `run_events` + `apps/api/logs/pipeline.jsonl` |
-| **Where in UI** | Activity panel on Today, research, web discovery |
+| **Where in UI** | Activity panel on research, web discovery |
 | **Status** | Available |
 
-### 8.2 Engine Call
+### 7.2 Engine Call
 
 | | |
 |--|--|
@@ -299,7 +249,7 @@ Relationships are flagged for P1-03 — not answered here.
 | **Where in UI** | Research Evidence expand; not a primary UI object |
 | **Status** | Available |
 
-### 8.3 Research Config
+### 7.3 Research Config
 
 | | |
 |--|--|
@@ -312,48 +262,25 @@ Relationships are flagged for P1-03 — not answered here.
 
 ---
 
-## 9. Escalation objects
+## 8. Escalation objects
 
 An **Escalation** is an operator **choice** that moves data into the next pipeline.
 
-### 9.1 Profile Escalation
-
-| | |
-|--|--|
-| **What** | Operator clicks **Profile** on a Today article card to start Deep Research on the primary company |
-| **Why** | Bridges discovery → company intelligence |
-| **Example** | Primary company from extracted_companies → `POST /api/research/runs` |
-| **Not confused with** | Analyst **+ ADD Escalation** ([P1-02-User §8.1](./P1-02-user.md)) — different frontend, same research pipeline |
-| **Backend** | New `runs` row with `trend_article_id` context |
-| **Where in UI** | Today article card → Profile |
-| **Status** | Available |
-
-### 9.2 Web Result Escalation
+### 8.1 Web Result Escalation
 
 | | |
 |--|--|
 | **What** | Operator promotes a Web Discovery Search Result into deep research or analyst review |
-| **Why** | Completes Web Discovery workflow end state |
-| **Example** | Escalate Exa hit to pending review |
+| **Why** | Completes Web Discovery workflow end state — primary admin discovery → research path |
+| **Example** | Escalate Exa hit on company domain → `POST /api/research/runs` |
+| **Not confused with** | Analyst **+ ADD Escalation** ([P1-02-User §8.1](./P1-02-user.md)) — different frontend, same research pipeline |
 | **Backend** | Not implemented |
-| **Where in UI** | Web Discovery results — target in P1-01 §2 |
+| **Where in UI** | Web Discovery results — target in [P1-01-Admin §3.2](./P1-01-admin.md) |
 | **Status** | Not implemented |
-
-### 9.3 Article Dismissal
-
-| | |
-|--|--|
-| **What** | Operator or API marks a Trend Article dismissed — removed from active Today cards |
-| **Why** | Clears irrelevant trend hits |
-| **Example** | `POST /api/discovery/articles/:id/dismiss` — no UI button today |
-| **Not confused with** | Analyst **Dismiss Escalation** on pending review |
-| **Backend** | `trend_articles.status = dismissed` |
-| **Where in UI** | API only — no button on cards |
-| **Status** | Partial |
 
 ---
 
-## 10. Summary table
+## 9. Summary table
 
 | Object | Meaning | Example |
 |--------|---------|---------|
@@ -363,10 +290,7 @@ An **Escalation** is an operator **choice** that moves data into the next pipeli
 | Web Discovery Query | One Exa search | “Pouch funding Canada” |
 | Web Discovery Query Run | One cluster/query execution | Run on June 5 |
 | Search Result | One Exa hit | PitchBook URL + snippet |
-| Discovery Cluster | Today keyword set | “Nicotine alternatives” |
-| Today Discovery Run | One Today pipeline | Discover click |
-| Trend Article | Enriched trend hit | Ranked article + companies |
-| Deep Research Run | One company profile run | Profile click |
+| Deep Research Run | One company profile run | Escalate from result |
 | Company | Canonical entity | takeultra.com |
 | Company Card | Research JSON snapshot | CompanyCardV1 blob |
 | Research Signal | Card signal row | Series A GROWTH |
@@ -374,18 +298,18 @@ An **Escalation** is an operator **choice** that moves data into the next pipeli
 | Run Event | Stage log line | Stage 2 OK |
 | Engine Call | Vendor audit row | anthropic call |
 | Research Config | Engine settings | Parallel pro |
-| Profile Escalation | Today → research | Profile button |
-| AI Analysis | LLM in pipeline | Haiku rank / Sonnet synth |
+| Web Result Escalation | Result → research | Escalate button |
+| AI Analysis | LLM in pipeline | Sonnet synth (Web Discovery LLM planned) |
 
 ---
 
-## 11. Relationship questions for P1-03
+## 10. Relationship questions for P1-03
 
 | # | Question |
 |---|----------|
 | 1 | Web Discovery Cluster ↔ analyst Search Cluster — merge or separate tables |
 | 2 | Search Result ↔ analyst Article — transform pipeline or independent |
-| 3 | Trend Article ↔ analyst Article — same object at different lifecycle stage |
+| 3 | Search Result ↔ analyst Article lifecycle — ingest path from Web Discovery to News feed |
 | 4 | Company Card ↔ analyst Company Profile — 1:1 naming, version history |
 | 5 | Deep Research Run ↔ Pending Review Item on user UI |
 | 6 | Research Signal ↔ Company Signal on analyst UI |
@@ -396,14 +320,15 @@ An **Escalation** is an operator **choice** that moves data into the next pipeli
 
 ---
 
-## 12. Completion checklist
+## 11. Completion checklist
 
 | Item | Status |
 |------|--------|
 | All admin console objects defined | Done |
 | Objects from P1-01-Admin covered | Done |
-| Web Discovery vs Today vs Research runs separated | Done |
-| Search Result vs Trend Article vs analyst Article distinguished | Done |
+| Web Discovery vs Research runs separated | Done |
+| Search Result vs analyst Article distinguished | Done |
+| Today / Discovery Cluster objects removed (dropped) | Done |
 | AI Analysis per pipeline documented | Done |
 | Escalation objects per operator choice | Done |
 | Backend table mapping included | Done |
@@ -411,7 +336,7 @@ An **Escalation** is an operator **choice** that moves data into the next pipeli
 
 ---
 
-## 13. Approval
+## 12. Approval
 
 | Role | Name | Date | Status |
 |------|------|------|--------|

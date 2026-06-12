@@ -321,8 +321,6 @@ An **Escalation** is an analyst **choice** that moves an entity into the next pi
 
 ## 11. How objects connect (overview)
 
-Formal ownership, cardinality, and cross-UI decisions: [P1-03](./P1-03.md).
-
 Plain-language links between the main things in NORAD AI:
 
 ```mermaid
@@ -351,26 +349,3 @@ flowchart LR
 | Article | Opportunity | Industry rules surface top stories on Home Top (planned) |
 | Watchlist | Opportunity | Weekly monitored signals on Home Top (planned) |
 
----
-
-## 12. Completion checklist
-
-| Item | Status |
-|------|--------|
-| All analyst UI objects defined | Done |
-| Objects from P1-01-User covered | Done |
-| AI Analysis defined as pipeline LLM concept | Done |
-| News Signal vs Company Signal split | Done |
-| Escalation objects per analyst choice | Done |
-| Organization and User included | Done |
-| Stakeholder-only language — no other UI references | Done |
-| Duplicate names reviewed | Done |
-
----
-
-## 13. Approval
-
-| Role | Name | Date | Status |
-|------|------|------|--------|
-| Author | Huzaifa | 2026-06-08 | Draft |
-| Reviewer | Shehrayar Haq | — | Pending |

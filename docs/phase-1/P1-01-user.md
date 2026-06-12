@@ -995,11 +995,3 @@ flowchart TD
 | + Add company → Pending review (Manual) | Available |
 | Watchlist daily monitoring → auto-append on detail | Planned |
 
----
-
-## 9. Approval
-
-| Role | Name | Date | Status |
-|------|------|------|--------|
-| Author | Huzaifa | 2026-06-08 | Draft |
-| Reviewer | Shehrayar Haq | — | Pending |
