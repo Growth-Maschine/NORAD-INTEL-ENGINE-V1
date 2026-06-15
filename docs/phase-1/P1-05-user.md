@@ -9,7 +9,8 @@
 | **Last updated** | 2026-06-09 |
 | **Audience** | BAT stakeholders, product, analysts |
 | **Workflow reference** | [P1-01-User](./P1-01-user.md) |
-| **Object reference** | [P1-02-User](./P1-02-user.md) · [P1-04-User](./P1-04-user.md) |
+| **Object reference** | [P1-02-User](./P1-02-user.md) · [P1-04](./P1-04-admin.md) Part III |
+| **Backend actions** | [P1-06](./P1-06.md) Part II |
 
 ---
 
@@ -596,5 +597,7 @@ Reverse lookup: where each object appears.
 |------|----------|
 | Step-by-step analyst flows | [P1-01-User](./P1-01-user.md) |
 | What objects are | [P1-02-User](./P1-02-user.md) |
-| Field-level spec | [P1-04-User](./P1-04-user.md) |
+| Field-level spec | [P1-04](./P1-04-admin.md) Part III |
+| Backend actions | [P1-06](./P1-06.md) Part II |
+| Backend actions | [P1-06](./P1-06.md) Part II |
 | Operator screens | [P1-05-Admin](./P1-05-admin.md) |

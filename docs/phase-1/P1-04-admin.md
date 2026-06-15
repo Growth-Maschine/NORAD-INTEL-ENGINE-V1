@@ -1,37 +1,44 @@
-# P1-04 — Required Fields (Admin Console)
+# P1-04 — Required Fields
 
 | Field | Value |
 |-------|-------|
-| **Document ref** | P1-04-Admin |
-| **Title** | Required Fields per Object — Admin Console |
-| **Version** | 1.1 |
+| **Document ref** | P1-04 |
+| **Title** | Required Fields per Object — Admin Console & Analyst App |
+| **Version** | 2.0 |
 | **Status** | Draft |
 | **Last updated** | 2026-06-09 |
-| **Audience** | Internal developers, operators |
+| **Audience** | Internal developers, operators · BAT stakeholders, analysts (Part III) |
 | **Linear** | [GRO-269](https://linear.app/growthmaschine/issue/GRO-269/40-define-required-fields-for-each-core-object) · Parent [GRO-265](https://linear.app/growthmaschine/issue/GRO-265) |
-| **Object reference** | [P1-02-Admin](./P1-02-admin.md) · [P1-03](./P1-03.md) |
-| **Analyst companion** | [P1-04-User](./P1-04-user.md) |
+| **Object reference** | [P1-02-Admin](./P1-02-admin.md) · [P1-02-User](./P1-02-user.md) · [P1-03](./P1-03.md) |
 | **Screen mapping** | [P1-05-Admin](./P1-05-admin.md) · [P1-05-User](./P1-05-user.md) |
+| **Backend actions** | [P1-06](./P1-06.md) |
 
 ---
 
 ## 1. Introduction
 
-This document defines the **target field model** for every admin-console object in [P1-02-Admin](./P1-02-admin.md). It is the field-level companion to [P1-03](./P1-03.md) (relationships).
+Single field-level spec for the whole NORAD data model. Companion to [P1-03](./P1-03.md) (relationships).
 
-**Conventions**
+| Part | Sections | Audience | Content |
+|------|----------|----------|---------|
+| **I — Admin Console** | §2–§8 | Operators, backend | Postgres columns, enums, FKs, implemented vs planned |
+| **II — Schema diagrams** | §9 | Engineering | Master ER, flows, `runs` polymorphism, composite FKs |
+| **III — Analyst App** | §10–§18 | BAT, product, analysts | Product-language fields, UI visibility, object flow |
+
+Shared objects (`companies`, `cards`, `signals`, `runs`) appear in **both** Part I (full schema) and Part III (analyst-visible subset).
+
+**Global conventions**
 
 | Rule | Decision |
 |------|----------|
-| `organization_id` | **Omitted** until multi-tenant ships (per product decision) |
-| Target vs current | **Target model** — Notes column marks `Implemented` · `Planned` · `Gap` vs `apps/api/app/models/` |
-| Non-table objects | Documented as **view or action** with fields on parent tables (§8) |
-| AI Analysis | Not a table — fields live on parent objects (§7) |
-| Schema diagrams | Full ER / flow diagrams in **§9** |
+| `organization_id` | **Omitted** until multi-tenant ships |
+| Part I Notes | `Implemented` · `Planned` · `Gap` vs `apps/api/app/models/` |
+| Part III Notes | `Available` · `In progress` · `Planned` (matches P1-02-User) |
+| Non-table objects | Views and actions — fields on parent tables |
+| AI Analysis | Not a table — fields on parent objects |
 | Today / `discovery` | **Dropped** — not in target model |
-| Searchable | Yes = indexed or full-text candidate in target schema |
 
-**Per-object table columns**
+**Part I table columns**
 
 | Column | Meaning |
 |--------|---------|
@@ -41,6 +48,23 @@ This document defines the **target field model** for every admin-console object 
 | Searchable | Yes / No |
 | UI | Where shown, or Internal only |
 | Notes | Enum values, FK, implemented status |
+
+**Part III table columns**
+
+| Column | Meaning |
+|--------|---------|
+| Field | Name of the stored attribute |
+| Type | Data shape (text, number, date, list, etc.) |
+| Required | Must be present for the object to be valid |
+| Searchable | Can be used in search or filters |
+| UI | Screen or control (`—` = not shown) |
+| Notes | Status and short context |
+
+---
+
+## Part I — Admin Console (Operator)
+
+Object definitions: [P1-02-Admin](./P1-02-admin.md). Workflows: [P1-01-Admin](./P1-01-admin.md).
 
 ---
 
@@ -431,9 +455,13 @@ Not a table. Post-pipeline LLM output columns:
 
 ---
 
-## 9. Database schema diagrams
+## Part II — Database schema diagrams
 
-Visual layer on top of field tables above and [P1-03](./P1-03.md) (relationships). Analyst-facing overview: [P1-04-User §9](./P1-04-user.md#9-how-objects-connect-overview).
+Visual layer on top of Part I field tables and [P1-03](./P1-03.md) (relationships). Analyst product flow: **§18**.
+
+---
+
+## 9. Database schema diagrams
 
 ### 9.1 How to read
 
@@ -921,24 +949,307 @@ flowchart LR
 
 ---
 
-## 10. Completion checklist
+## Part III — Analyst App (BAT)
 
-| Item | Status |
-|------|--------|
-| Field table for every P1-02-Admin object | Done |
-| Required vs optional on each field | Done |
-| Types documented | Done |
-| UI visibility noted | Done |
-| Searchable fields flagged | Done |
-| Implemented / planned / gap in Notes | Done |
-| Non-table objects (§8) | Done |
-| CompanyCardV1 JSON deferred to schema | Done |
-| `organization_id` omitted per MVP decision | Done |
-| Database schema diagrams (§9) | Done |
+Object definitions: [P1-02-User](./P1-02-user.md). Workflows: [P1-01-User](./P1-01-user.md). Full Postgres columns for shared objects: **Part I §4**.
 
 ---
 
-## 11. Approval
+## 10. Analyst — Platform objects
+
+### 10.1 Organization *(planned)*
+
+Single-tenant in the first release — one implicit organization, no separate org screen.
+
+### 10.2 User
+
+| Field | Type | Required | Searchable | UI | Notes |
+|-------|------|----------|------------|-----|-------|
+| id | identifier | Yes | No | — | **Planned** |
+| email | text | Yes | Yes | Settings profile | **Planned** |
+| display_name | text | No | Yes | Sidebar | **Planned** |
+| role | analyst / lead / admin | Yes | No | — | **Planned** |
+| created_at | date-time | Yes | No | — | **Planned** |
+| updated_at | date-time | Yes | No | — | **Planned** |
+
+---
+
+## 11. Analyst — Discovery and feed objects
+
+### 11.1 Search Cluster
+
+**Status:** Planned · Settings → Clusters
+
+| Field | Type | Required | Searchable | UI | Notes |
+|-------|------|----------|------------|-----|-------|
+| id | identifier | Yes | No | — | |
+| name | text | Yes | Yes | Cluster list, Settings | Theme label e.g. "NGP Canada" |
+| slug | text | Yes | No | — | Short unique key |
+| description | text | No | No | Cluster detail | |
+| include_keywords | list of text | Yes | No | Cluster settings | Monitoring scope |
+| exclude_keywords | list of text | No | No | Cluster settings | |
+| geography | list of text | No | No | Cluster settings | |
+| source_preferences | list of text | No | No | Cluster settings | |
+| signal_types | list of text | No | No | Cluster settings | FUND, FDA, etc. |
+| is_active | yes/no | Yes | Yes | Cluster list | |
+| schedule | text | No | No | Cluster settings | Auto-run schedule · **Planned** |
+| query_count | number | Yes | No | Cluster list | Count of queries in cluster |
+| last_run_at | date-time | No | Yes | Cluster list | |
+| created_at | date-time | Yes | No | Cluster metadata | |
+| updated_at | date-time | Yes | No | — | |
+
+### 11.2 Search Query
+
+**Status:** Planned
+
+| Field | Type | Required | Searchable | UI | Notes |
+|-------|------|----------|------------|-----|-------|
+| id | identifier | Yes | No | — | |
+| cluster | link to Search Cluster | Yes | No | — | Parent theme |
+| name | text | Yes | Yes | Query list | Short label |
+| query_text | text | Yes | Yes | Query editor | Search string |
+| parameters | settings object | No | No | Query editor | Advanced search options · **Planned** |
+| is_active | yes/no | Yes | Yes | Query list | |
+| created_at | date-time | Yes | No | Query metadata | |
+| updated_at | date-time | Yes | No | — | |
+
+### 11.3 Query Run (analyst)
+
+**Status:** Planned · background job when analyst runs a cluster query
+
+| Field | Type | Required | Searchable | UI | Notes |
+|-------|------|----------|------------|-----|-------|
+| id | identifier | Yes | No | — | |
+| cluster | link to Search Cluster | Yes | No | — | Which theme was run |
+| query | link to Search Query | Yes | No | — | Which search string was run |
+| status | running / completed / failed | Yes | No | — | |
+| started_at | date-time | No | No | — | |
+| completed_at | date-time | No | No | — | |
+| error_message | text | No | No | — | Shown to ops if run fails |
+| created_at | date-time | Yes | No | — | |
+
+### 11.4 Article
+
+**Status:** Planned · News feed, Signals page
+
+| Field | Type | Required | Searchable | UI | Notes |
+|-------|------|----------|------------|-----|-------|
+| id | identifier | Yes | No | — | |
+| url | text | Yes | Yes | Article link | Unique |
+| title | text | Yes | Yes | News row headline | |
+| summary | text | No | Yes | Expanded article | AI or excerpt |
+| body_text | text | No | Yes | Expanded article | |
+| source_name | text | No | Yes | News row | Publisher |
+| published_at | date-time | No | Yes | News row date | |
+| ingested_at | date-time | Yes | No | — | When system added the story |
+| cluster | link to Search Cluster | No | No | — | Which theme surfaced it |
+| category_tag | text | No | Yes | News row tag | e.g. MED-NIC |
+| priority_score | number | No | Yes | News row, Signals sort | 0–100 |
+| mentioned_companies | list | No | Yes | Companies in story | Name, domain, excerpt per company |
+| status | active / dismissed / archived | Yes | No | — | |
+| created_at | date-time | Yes | No | — | |
+| updated_at | date-time | Yes | No | — | |
+
+### 11.5 News Signal
+
+**Status:** Planned · stored on the Article or as linked signal rows
+
+| Field | Type | Required | Searchable | UI | Notes |
+|-------|------|----------|------------|-----|-------|
+| id | identifier | Yes | No | — | |
+| article | link to Article | Yes | No | — | Parent story |
+| signal_type | FUND / FDA / LEGAL / PARTNER / PRODUCT / … | Yes | Yes | News row, Signals tabs | |
+| score | number | No | Yes | News row priority | 0–100 |
+| headline | text | No | Yes | Signals table | Short label |
+| created_at | date-time | Yes | No | — | |
+
+### 11.6 Opportunity
+
+**Status:** Planned · derived weekly digest on Home → Top (not a separate stored object)
+
+| Field | Type | Required | Searchable | UI | Notes |
+|-------|------|----------|------------|-----|-------|
+| id | identifier | Yes | No | — | |
+| subtype | watchlist / industry | Yes | Yes | Top tab section | |
+| company | link to Company | No | Yes | Watchlist opportunity card | Watchlist subtype only |
+| article | link to Article | No | Yes | Industry opportunity card | Industry subtype only |
+| signal_type | text | No | Yes | Opportunity card | |
+| title | text | Yes | Yes | Opportunity heading | |
+| bullets | list of text | Yes | No | Opportunity card body | |
+| week_start | date | Yes | Yes | Top tab filter | Digest window |
+| rule | link to Monitoring Rule | No | No | — | Rule that matched |
+
+---
+
+## 12. Analyst — Company intelligence objects
+
+### 12.1 Company
+
+**Status:** Available (partial) · shared with operator console — full schema: **Part I §4.2**
+
+| Field | Analyst UI | Notes |
+|-------|------------|-------|
+| company_name | Companies list, Pending review, +ADD modal | **Available** |
+| domain | Company header | **Available** |
+| industry, category | Companies filters | **Available** |
+| on_watchlist | Watchlist tab | **Planned** |
+
+### 12.2 Company Profile
+
+**Status:** Available · structured profile behind Overview, Signals, People, Financials tabs — full schema: **Part I §4.3**
+
+| Field | Analyst UI | Notes |
+|-------|------------|-------|
+| review_status | Pending review queue | `draft` = awaiting promote/dismiss |
+| fit_score | Pending review card, company header | Overall score 0–100 |
+| profile_data | All profile tabs | Full company intelligence document |
+
+### 12.3 Company Signal
+
+**Status:** Available · timeline events on the company profile — full schema: **Part I §4.4**
+
+---
+
+## 13. Analyst — Decision objects
+
+### 13.1 Pending Review Item
+
+**Status:** Available · queue row — not a separate stored object; built from Company + Company Profile in draft state
+
+| Field shown | Required | UI | Notes |
+|-------------|----------|-----|-------|
+| company_name | Yes | Queue row | |
+| domain | No | Queue row | |
+| fit_summary | No | Expanded card | Short excerpt from profile |
+| fit_score | No | Queue row badge | |
+| origin | No | Queue tab filter | bookmark · article +ADD · manual · **Planned:** operator escalate |
+| created_at | Yes | Queue sort | When profile entered review |
+
+### 13.2 Watchlist Entry
+
+**Status:** Planned · company promoted from Pending Review to ongoing monitoring
+
+| Field | Type | Required | Searchable | UI | Notes |
+|-------|------|----------|------------|-----|-------|
+| company | link to Company | Yes | Yes | Watchlist tab | |
+| promoted_at | date-time | Yes | Yes | Watchlist metadata | Set when analyst clicks Promote |
+| promoted_by | user | No | No | — | **Planned** |
+| monitoring_tier | text | No | No | — | Baseline screener label · **Planned** |
+
+### 13.3 Manual Bookmark
+
+**Status:** Available · analyst input from + Add company modal; triggers deep research
+
+| Input field | Type | Required | UI | Notes |
+|-------------|------|----------|-----|-------|
+| company_name | text | Yes | + Add company modal | |
+| website_url | text | No | + Add company modal | |
+| notes | text | No | Modal | **Planned** |
+
+---
+
+## 14. Analyst — Escalation actions
+
+**Status:** Available (partial) · actions, not stored objects — each choice updates Company / Profile state
+
+| Escalation | Input | Effect |
+|------------|-------|--------|
+| **+ ADD** | Article + company name from story | Starts deep research → Company Profile enters Pending Review |
+| **Promote** | Pending Review item | Profile accepted → company joins Watchlist |
+| **Dismiss** | Pending Review item | Profile rejected → removed from queue |
+
+---
+
+## 15. Analyst — Monitoring Rule
+
+**Status:** Planned · Settings → Monitoring rules
+
+| Field | Type | Required | Searchable | UI | Notes |
+|-------|------|----------|------------|-----|-------|
+| id | identifier | Yes | No | — | |
+| name | text | Yes | Yes | Rules settings | |
+| is_active | yes/no | Yes | Yes | Rules list | |
+| signal_types | list of text | No | No | Rule editor | e.g. FDA, FUND |
+| min_score | number | No | No | Rule editor | 0–100 |
+| categories | list of text | No | No | Rule editor | |
+| target_surface | signals tab / home top / watchlist digest | Yes | No | Rule editor | Where matched items appear |
+| signals_tab_key | text | No | No | Rule editor | e.g. regulatory, filings |
+| created_at | date-time | Yes | No | — | |
+| updated_at | date-time | Yes | No | — | |
+
+---
+
+## 16. Analyst — AI Analysis (visible fields)
+
+| Parent | Field | Type | UI | Status |
+|--------|-------|------|-----|--------|
+| Article | summary | text | Expanded article | **Planned** |
+| Article | priority_score | integer | News row sort | **Planned** |
+| News Signal | signal_type, score | — | Signals tabs | **Planned** |
+| Company Profile | profile_data | structured document | Profile tabs | **Available** via deep research |
+
+---
+
+## 17. Analyst — How objects connect
+
+Product-language flow (complements Part II ER diagrams):
+
+```mermaid
+flowchart TB
+    SC[Search Cluster]
+    SQ[Search Query]
+    QR[Query Run]
+    ART[Article]
+    NS[News Signal]
+    MR[Monitoring Rule]
+    OPP[Opportunity]
+    ADD[+ ADD]
+    DR[Deep Research]
+    CP[Company Profile]
+    PR[Pending Review]
+    WL[Watchlist]
+    CO[Company]
+    CS[Company Signal]
+
+    SC --> SQ --> QR --> ART
+    ART --> NS
+    MR -.-> ART
+    MR -.-> OPP
+    ART -.-> OPP
+    ART --> ADD --> DR --> CP
+    CP -->|draft| PR --> WL
+    WL --> CO
+    CP --> CS
+```
+
+| Step | What happens |
+|------|----------------|
+| Run cluster query | System fetches new Articles into News and Signals |
+| Monitoring Rule | Filters which Articles and Opportunities surface on Home |
+| + ADD on Article | Deep research builds a Company Profile → Pending Review |
+| Promote | Company joins Watchlist for ongoing monitoring |
+| Watchlist | New Company Signals append on the profile over time |
+
+Also: [P1-02-User §11](./P1-02-user.md#11-how-objects-connect-overview)
+
+---
+
+## 18. Completion checklist
+
+| Item | Status |
+|------|--------|
+| Part I — field table for every P1-02-Admin object | Done |
+| Part I — required / optional, types, UI, searchable | Done |
+| Part II — database schema diagrams (§9) | Done |
+| Part III — field table for every P1-02-User object | Done |
+| Part III — analyst escalation + connection flow (§17) | Done |
+| Shared objects cross-referenced Part I ↔ Part III | Done |
+| CompanyCardV1 JSON deferred to `apps/api/app/schemas/` | Done |
+| `organization_id` omitted per MVP decision | Done |
+
+---
+
+## 19. Approval
 
 | Role | Name | Date | Status |
 |------|------|------|--------|

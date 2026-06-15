@@ -35,11 +35,10 @@ All current-state claims are verified against `apps/web`, `apps/api`, and `apps/
 | P1-02-Admin | [Core Product Objects — Admin Console](./P1-02-admin.md) | 1.1 | Draft |
 | P1-02-User | [Core Product Objects](./P1-02-user.md) | 1.2 | Draft |
 | P1-03 | [Object Relationships](./P1-03.md) | 1.2 | Draft |
-| P1-04-Admin | [Required Fields — Admin Console](./P1-04-admin.md) | 1.1 | Draft |
-| P1-04-User | [Required Fields — Analyst App](./P1-04-user.md) | 1.2 | Draft |
+| P1-04 | [Required Fields — Admin & Analyst](./P1-04-admin.md) | 2.0 | Draft |
 | P1-05-Admin | [UI Screen Mapping — Admin Console](./P1-05-admin.md) | 1.0 | Draft |
 | P1-05-User | [UI Screen Mapping — Analyst App](./P1-05-user.md) | 1.0 | Draft |
-| P1-06 | Backend Actions | — | Not started |
+| P1-06 | [Backend Actions](./P1-06.md) | 1.0 | Draft |
 | P1-07 | MVP Scope Boundaries | — | Not started |
 
 Documents are produced and approved in numerical order. P1-00 is the controlling overview.

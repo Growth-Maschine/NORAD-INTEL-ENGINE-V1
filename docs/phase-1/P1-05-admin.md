@@ -10,14 +10,15 @@
 | **Audience** | Internal developers, operators |
 | **Linear** | [GRO-270](https://linear.app/growthmaschine/issue/GRO-270/50-map-existing-ui-screens-to-product-data-objects) · Parent [GRO-265](https://linear.app/growthmaschine/issue/GRO-265) |
 | **Workflow reference** | [P1-01-Admin](./P1-01-admin.md) |
-| **Object reference** | [P1-02-Admin](./P1-02-admin.md) · [P1-04-Admin](./P1-04-admin.md) |
+| **Object reference** | [P1-02-Admin](./P1-02-admin.md) · [P1-04](./P1-04-admin.md) |
 | **Analyst companion** | [P1-05-User](./P1-05-user.md) |
+| **Backend actions** | [P1-06](./P1-06.md) |
 
 ---
 
 ## 1. Introduction
 
-Maps every **operator console screen** to product objects and actions. Workflow narrative: [P1-01-Admin](./P1-01-admin.md). Field spec: [P1-04-Admin](./P1-04-admin.md). Schema diagrams: [P1-04-Admin §9](./P1-04-admin.md#9-database-schema-diagrams).
+Maps every **operator console screen** to product objects and actions. Workflow narrative: [P1-01-Admin](./P1-01-admin.md). Field spec: [P1-04](./P1-04-admin.md) Part I. Schema diagrams: [P1-04 §9](./P1-04-admin.md#9-database-schema-diagrams).
 
 **Dropped from target:** Today (`/discover`), Discovery Clusters (`/discovery-clusters`). Web Discovery is the operator discovery path.
 
