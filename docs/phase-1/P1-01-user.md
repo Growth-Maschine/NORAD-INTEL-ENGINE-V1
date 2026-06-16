@@ -5,7 +5,6 @@
 | **Document ref** | P1-01-User |
 | **Title** | Core Analyst Workflow |
 | **Version** | 1.7 |
-| **Status** | Draft |
 | **Last updated** | 2026-06-08 |
 | **Audience** | Stakeholders, product, and analyst users |
 
@@ -71,7 +70,7 @@ The **first section** on the Top tab. Shows this week's signals for companies th
 
 After the analyst **Promotes** a company from Pending review, it enters the **Watchlist**. The system monitors those companies continuously. Each week, new activity is detected (news, filings, funding, partnerships, etc.) and evaluated against **configured rules and criteria** (signal type, relevance, recency, tier). Signals that pass appear automatically in **Opportunities this week — Watchlist** — no manual refresh needed.
 
-Watchlist monitoring and rules engine — **planned**; Top tab layout is available today.
+Watchlist monitoring and rules engine —; Top tab layout is documented.
 
 **Flow:**
 
@@ -82,7 +81,7 @@ Watchlist monitoring and rules engine — **planned**; Top tab layout is availab
 | Condition | What the user sees | What the system does |
 |-----------|-------------------|----------------------|
 | No companies on Watchlist yet | Section empty or hidden | Nothing to show until first **Promote** |
-| Monitoring not live | Static or stale cards | Layout visible; weekly refresh planned |
+| Monitoring inactive | Static or stale cards | Layout visible until weekly refresh runs |
 | No signals matched rules this week | Empty section or "no activity" message | Company stays on Watchlist; no false positives shown |
 
 ---
@@ -106,9 +105,9 @@ The **second section** below Watchlist on the Top tab. Shows sector-wide opportu
 
 **Pipeline:** `News tab articles + cluster results → AI signal extraction → Rules/criteria filter → Auto-surface on Top · Industry section`
 
-Articles ingested via Search Clusters and shown on the **News** tab and **Signals** page (§3) are continuously analysed. When an article or story matches **configured rules and criteria** (signal type, category, score threshold, geography, etc.), the system extracts opportunity signals and **automatically adds** them to **Opportunities this week — Industry** on the Top tab. The analyst does not manually curate this list — it is rule-driven from the news pipeline.
+Articles ingested from operator cluster runs and shown on the **News** tab and **Signals** page (§3) are continuously analysed. When an article or story matches **configured rules and criteria** (signal type, category, score threshold, geography, etc.), the system extracts opportunity signals and **automatically adds** them to **Opportunities this week — Industry** on the Top tab. The analyst does not manually curate this list — it is rule-driven from the news pipeline.
 
-Rules engine and auto-surfacing — **planned**; Industry section layout is available today.
+Rules engine and auto-surfacing —; Industry section layout is documented.
 
 **Flow:**
 
@@ -125,7 +124,7 @@ Rules engine and auto-surfacing — **planned**; Industry section layout is avai
 
 | Condition | What the user sees | What the system does |
 |-----------|-------------------|----------------------|
-| Rules engine not live | Empty or demo cards | Layout visible; auto-surfacing planned |
+| Rules inactive | Empty or demo cards | Layout visible until rules assign cards |
 | No articles matched criteria this week | Empty Industry section | No cards added — analyst uses News tab instead |
 | Cluster not configured | Sparse or no industry content | No new articles to evaluate until clusters exist |
 
@@ -170,9 +169,9 @@ flowchart TD
 
 **Behind the scenes:**
 
-**Pipeline:** `Search Cluster → Queries execute → Exa web search → Articles stored → Hot News list`
+**Pipeline:** `Cluster run → Exa web search → Articles stored → Hot News list`
 
-Configured Search Clusters hold one or more search queries. When a cluster runs (on a schedule — planned; manual today), the backend executes each query through **Exa**, a web search engine that finds matching articles and stores them. Category tags, signal tags, and the headline score on each row come from enrichment applied before or as articles enter the feed. The analyst sees finished results — not the search running live.
+Operators configure clusters and queries in the admin console. Scheduled runs execute each query through **Exa**, find matching articles, enrich them, and store them for the analyst feed. Category tags, signal tags, and the headline score on each row come from enrichment applied before articles enter the feed. The analyst sees finished results.
 
 **Flow:**
 
@@ -184,9 +183,9 @@ The analyst lands on Home and reads the highest-priority market signal. Category
 
 | Condition | What the user sees | What the system does |
 |-----------|-------------------|----------------------|
-| No clusters configured | Empty Hot News table | No articles ingested until Search Clusters exist (§7) |
-| Cluster run produced zero hits | Empty table or "no stories" message | Run completed with no matches — analyst adjusts cluster scope |
-| Scheduled runs not live | Stale feed (older dates) | Manual cluster runs only until scheduling ships |
+| No clusters configured | Empty Hot News table | No articles until operator configures clusters and runs ingest |
+| Cluster run produced zero hits | Empty table or "no stories" message | Run completed with no matches — operator adjusts cluster scope |
+| Scheduled runs pending | Stale feed (older dates) | Articles update when cron ingest runs |
 
 ---
 
@@ -374,7 +373,7 @@ The **Signals** page shows the **same incoming news** that feeds Home → **News
 
 **Pipeline:** `Incoming article → AI enrichment (category + signal type + score) → Rules/criteria assign tab → Signals page filter`
 
-When articles enter the system from Search Clusters (§7), each one is enriched with a **category tag** (e.g. MED-NIC, VAPE, CESS), a **signal tag** (e.g. FUND, FDA, GREY, SENT), and a **score**. Configured **rules and criteria** map each story to one or more filter tabs. Clicking a tab applies that category filter — the analyst is not manually sorting; the rules engine has already classified each item.
+When articles enter the system from cluster ingest (§7), each one is enriched with a **category tag** (e.g. MED-NIC, VAPE, CESS), a **signal tag** (e.g. FUND, FDA, GREY, SENT), and a **score**. Configured **rules and criteria** map each story to one or more filter tabs. Clicking a tab applies that category filter — the analyst is not manually sorting; the rules engine has already classified each item.
 
 **Flow:**
 
@@ -385,7 +384,7 @@ When articles enter the system from Search Clusters (§7), each one is enriched 
 | Condition | What the user sees | What the system does |
 |-----------|-------------------|----------------------|
 | Tab has zero matches | Tab shows count `0`; empty table | No rows for that category — analyst switches tab |
-| Rules engine not live | All tabs show same unfiltered list | Categorization planned — counts may not reflect rules yet |
+| Rules engine not live | All tabs show same unfiltered list | Categorization counts may not reflect rules yet |
 | Feed stale | "updated Xm ago" shows old timestamp | No new cluster runs since last ingestion |
 
 ---
@@ -443,7 +442,7 @@ The Signals page is the **master categorized view** of all incoming news. Home N
 
 ```mermaid
 flowchart TD
-    CLUSTERS[Search Clusters run] --> EXA[Exa web search]
+    CLUSTERS[Operator cluster runs] --> EXA[Exa web search]
     EXA --> STORE[Articles stored + AI enriched]
     STORE --> RULES[Rules and criteria classify]
 
@@ -558,7 +557,7 @@ While Stages 2–3 are running, the card shows that research is still in progres
 
 **Behind the scenes:**
 
-**Pipeline:** `Promote → Watchlist record created → Baseline screener runs → Fit score + tier filled → Monitoring (planned)`
+**Pipeline:** `Promote → Watchlist record created → Baseline screener runs → Fit score + tier filled → Monitoring`
 
 Accepting the company writes it to the **Watchlist** and triggers a **baseline screener** — a lighter pipeline pass that scores strategic fit, assigns a tier, and fills profile fields for ongoing use. The company appears on the **Companies** page (§5). Once monitoring is live, new signals auto-append to the company detail page (§5.8) and weekly highlights surface on Home Top (§2.2).
 
@@ -572,7 +571,7 @@ Accepting the company writes it to the **Watchlist** and triggers a **baseline s
 |-----------|-------------------|----------------------|
 | Research not complete | Promote button disabled | Cannot promote until profile saved |
 | Already on Watchlist | Toast or button disabled | No duplicate watchlist entry |
-| Baseline screener fails | Company on Watchlist; fit fields empty | Watchlist entry kept; screener retry planned |
+| Baseline screener fails | Company on Watchlist; fit fields empty | Watchlist entry kept; screener retry |
 
 ---
 
@@ -623,7 +622,7 @@ flowchart TD
     SUMMARY --> DECIDE{Analyst decision}
     DECIDE -->|Promote| PROMOTE[Add to Watchlist]
     PROMOTE --> SCREENER[Baseline screener runs]
-    SCREENER --> WATCH[Ongoing monitoring — planned]
+    SCREENER --> WATCH[Ongoing monitoring]
     DECIDE -->|Dismiss| DISMISS[Remove from queue]
     DISMISS --> END([Done])
 ```
@@ -829,7 +828,7 @@ People, financials, and timeline fields are extracted during **Claude Sonnet** s
 
 Each day the system scans for new activity related to **watchlist** companies. When a new article or signal is found and passes rules, it is **automatically appended** to that company's detail page — Overview timeline, Signals feed, and Last Updated on the Companies list. The analyst does not manually refresh or re-run research.
 
-Watchlist daily monitoring — **planned**; profile layout and deep research content are **available** today.
+Watchlist daily monitoring appends new signals to the company profile. Profile layout and deep research content come from the research pipeline.
 
 **Flow:**
 
@@ -854,7 +853,7 @@ flowchart TD
     CLICK --> PROFILE[Company detailed profile]
 
     PROFILE --> DR[Deep research card — Overview / Signals / People / Financials]
-    WL --> MON[Daily watchlist monitoring — planned]
+    WL --> MON[Daily watchlist monitoring]
     MON --> NEW[New signal detected]
     NEW --> APPEND[Auto-append to profile timeline + Signals tab]
 ```
@@ -902,73 +901,56 @@ flowchart LR
 
 ## 7. How news enters the feed (supporting workflow)
 
-This section explains where Hot News content comes from. It is configured separately from daily reading — not the analyst's first step.
+This section explains where Hot News content comes from. Clusters and queries are configured in the **admin console** — analysts read the resulting feed on Home → News.
 
 ### 7.1 Overview
 
 | Attribute | Value |
 |-----------|-------|
-| **Entry** | Profile menu → **Settings** → **Clusters** card |
-| **Purpose** | Define what topics the system monitors and searches for |
-| **Feeds** | Home **News** tab (on schedule — planned) |
+| **Configured by** | Operator — admin console `/discover-web` |
+| **Consumed by** | Analyst — Home **News** tab and **Signals** page |
+| **Purpose** | Themed Exa searches that ingest articles into the intelligence feed |
+| **Schedule** | Cron ingest |
 
 ---
 
-### 7.2 Configure a Search Cluster
+### 7.2 Operator cluster setup (reference)
 
-**What the user is trying to do:** Define what topics NORAD monitors so the right articles flow into Home News and Signals — scope before reading.
+**What happens:** The operator defines monitoring scope — keywords, geography, sources, signal priorities — and adds Exa search queries per cluster. Running a cluster (or scheduled cron) executes queries, collects hits, and (when wired) enriches them before they appear as **Articles** on the analyst feed.
 
-| Component | User action | Action type | What the user sets |
-|-----------|-------------|-------------|-------------------|
-| **Settings → Clusters** | Click | Navigate | Search Clusters page opens |
-| **+ Create Cluster** | Click | Navigate | Create form opens |
-| **Cluster name and description** | Type | Configure | What the cluster monitors |
-| **Priority and status** | Select / toggle | Configure | How often and whether it is active |
-| **Keywords, geography, sources** | Fill | Configure | Search scope and filters |
-| **Signal detection** | Check types | Configure | Funding, regulatory, product launch, etc. |
-| **Create Cluster** | Click | Configure | Cluster saved |
-| **Open Cluster** | Click | Navigate | Cluster detail — Overview, Queries, Results, Settings tabs |
-| **+ Add Query** | Click | Configure | Adds a specific search inside the cluster |
+**Pipeline:** `Operator configures cluster → Adds queries → Run or cron → Exa search per query → Articles enriched → Home News feed`
 
-**Behind the scenes:**
+Analyst workflow for this path: read Home → News. Cluster CRUD lives in [P1-01-Admin](./P1-01-admin.md) and [P1-02-Admin](./P1-02-admin.md).
 
-**Pipeline:** `Create cluster → Add queries → Run cluster → Exa search per query → Articles enriched → Home News feed (scheduled — planned)`
-
-The cluster defines monitoring scope — keywords, geography, sources, and signal types. Each **query** inside a cluster is an **Exa** web search. Running a cluster executes every active query, collects matching articles, and (when wired) enriches them with AI summarisation and scoring before they appear on Home News. Scheduled runs (planned) will repeat this pipeline automatically on a cron the analyst sets.
-
-**Flow:**
-
-`Profile menu → Settings` → `Clusters` → `Create or open cluster` → `Add queries`
-
-**Failure states:**
+**Failure states (analyst-visible):**
 
 | Condition | What the user sees | What the system does |
 |-----------|-------------------|----------------------|
-| Cluster saved with no queries | Empty Queries tab | No articles until at least one query added |
-| Cluster paused | Status shows inactive | Scheduled runs skip this cluster |
-| Scheduled runs not live | No new articles after save | Analyst waits for scheduling feature (§7.3) |
+| No clusters configured | Empty Hot News table | Operator must configure clusters and run ingest |
+| Cluster run produced zero hits | Empty table | Operator adjusts cluster scope |
+| Scheduled ingest | Stale feed | Articles update when cron ingest runs |
 
 ---
 
-### 7.3 Planned: scheduled cluster runs
+### 7.3 Scheduled cluster runs
 
-| Capability | Status |
-|------------|--------|
-| Analyst picks run times (cron schedule) | Planned |
-| Articles auto-append to Home News | Planned |
-| Additional search criteria on cluster engine | Planned |
+| Capability |
+| ------------ |
+| Operator sets run schedule (cron) |
+| Articles auto-append to Home News |
+| Post-run LLM enrichment on ingest |
 
 ---
 
-### 7.4 Diagram — Cluster to News (planned)
+### 7.4 Diagram — Cluster to News
 
 ```mermaid
 flowchart TD
-    START([Settings → Clusters]) --> CREATE[Create or edit cluster]
+    ADMIN([Admin console — Clusters]) --> CREATE[Create or edit cluster]
     CREATE --> QUERIES[Add search queries]
-    QUERIES --> SCHEDULE[Schedule runs — planned]
+    QUERIES --> SCHEDULE[Schedule runs]
     SCHEDULE --> RUN[Cluster search executes]
-    RUN --> NEWS[Articles appear on Home News]
+    RUN --> NEWS[Articles on analyst Home News]
 ```
 
 ---
@@ -977,21 +959,20 @@ flowchart TD
 
 | Capability | User experience today |
 |------------|----------------------|
-| Home Top tab layout (Watchlist + Industry sections) | Available |
-| Watchlist weekly signals (rules-driven) | Planned |
-| Industry auto-surface from news (rules-driven) | Planned |
-| Home News tab layout | Available |
-| Expand article and signal scores | Available |
-| + ADD → deep research | In progress |
-| Pending review queue | Available |
-| Research summary on expand | In progress |
+| Home Top tab layout (Watchlist + Industry sections) |
+| Watchlist weekly signals (rules-driven) |
+| Industry auto-surface from news (rules-driven) |
+| Home News tab layout |
+| Expand article and signal scores |
+| + ADD → deep research |
+| Pending review queue |
+| Research summary on expand |
 | Promote to Watchlist | UI ready; links to §2.2 when monitoring live |
-| Dismiss from pending | In progress |
-| Cluster create and manage | Available |
-| Scheduled cluster runs → News feed | Planned |
-| Signals page — categorized tabs + feed table | Available |
-| Signals — rules/criteria auto-categorization | Planned |
-| Companies page — list tabs + detail profile | Available |
-| + Add company → Pending review (Manual) | Available |
-| Watchlist daily monitoring → auto-append on detail | Planned |
-
+| Dismiss from pending |
+| Cluster create and manage |
+| Scheduled cluster runs → News feed |
+| Signals page — categorized tabs + feed table |
+| Signals — rules/criteria auto-categorization |
+| Companies page — list tabs + detail profile |
+| + Add company → Pending review (Manual) |
+| Watchlist daily monitoring → auto-append on detail |

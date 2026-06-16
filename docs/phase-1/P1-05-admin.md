@@ -5,7 +5,6 @@
 | **Document ref** | P1-05-Admin |
 | **Title** | UI Screen Mapping — Admin Console |
 | **Version** | 1.0 |
-| **Status** | Draft |
 | **Last updated** | 2026-06-09 |
 | **Audience** | Internal developers, operators |
 | **Linear** | [GRO-270](https://linear.app/growthmaschine/issue/GRO-270/50-map-existing-ui-screens-to-product-data-objects) · Parent [GRO-265](https://linear.app/growthmaschine/issue/GRO-265) |
@@ -24,18 +23,18 @@ Maps every **operator console screen** to product objects and actions. Workflow 
 
 ## 2. Screen inventory
 
-| # | Screen | Route | Status | P1-01 |
-|---|--------|-------|--------|-------|
-| 1 | Dashboard | `/` | Available (placeholder) | §8 |
-| 2 | Web Discovery list | `/discover-web` | Available | §2 |
-| 3 | Web Discovery cluster | `/discover-web/clusters/:clusterId` | Available | §2 |
-| 4 | Query editor (new) | `.../clusters/:id/queries/new` | Available | §2 |
-| 5 | Query editor (edit) | `.../clusters/:id/queries/:queryId` | Available | §2 |
-| 6 | Query results | `.../queries/:queryId/results` | Available | §2 |
-| 7 | Deep Research run log | `/runs/:id` | Available | §3.6 |
-| 8 | Companies list | `/companies` | Available | §3.3 |
-| 9 | Company detail | `/companies/:id` | Available | §3.4–3.5 |
-| 10 | Settings | `/settings` | Available | §7 |
+| # | Screen | Route | P1-01 |
+| --- | -------- | ------- | ------- |
+| 1 | Dashboard | `/` | §8 |
+| 2 | Cluster list | `/discover-web` | §2 |
+| 3 | Cluster detail | `/discover-web/clusters/:clusterId` | §2 |
+| 4 | Query editor (new) | `.../clusters/:id/queries/new` | §2 |
+| 5 | Query editor (edit) | `.../clusters/:id/queries/:queryId` | §2 |
+| 6 | Query results | `.../queries/:queryId/results` | §2 |
+| 7 | Deep Research run log | `/runs/:id` | §3.6 |
+| 8 | Companies list | `/companies` | §3.3 |
+| 9 | Company detail | `/companies/:id` | §3.4–3.5 |
+| 10 | Settings | `/settings` | §7 |
 
 ---
 
@@ -45,12 +44,11 @@ Maps every **operator console screen** to product objects and actions. Workflow 
 
 | Purpose | Operator landing — quick links and system snapshot |
 |---------|-----------------------------------------------------|
-| **Status** | Available — static entry; not primary workflow |
 
-| Object | Status |
-|--------|--------|
-| Company (count stat) | Available |
-| Web Discovery Query Run (count stat) | Available |
+| Object |
+| -------- |
+| Company (count stat) |
+| Run (count stat) |
 
 | Control | Action type | Effect |
 |---------|-------------|--------|
@@ -59,13 +57,12 @@ Maps every **operator console screen** to product objects and actions. Workflow 
 
 ---
 
-### 3.2 Web Discovery list (`/discover-web`)
+### 3.2 Cluster list (`/discover-web`)
 
-| Purpose | List all operator Web Discovery clusters |
-|---------|------------------------------------------|
-| **Status** | Available |
+| Purpose | List all operator clusters |
+|---------|---------------------------|
 
-**Objects:** Web Discovery Cluster
+**Objects:** Cluster
 
 | Control | Action type | Effect | Backend |
 |---------|-------------|--------|---------|
@@ -77,19 +74,18 @@ Maps every **operator console screen** to product objects and actions. Workflow 
 
 ---
 
-### 3.3 Web Discovery cluster (`/discover-web/clusters/:clusterId`)
+### 3.3 Cluster detail (`/discover-web/clusters/:clusterId`)
 
 | Purpose | Command center — queries, run all, results entry |
 |---------|--------------------------------------------------|
-| **Status** | Available |
 
 **Objects**
 
 | Object | Area |
 |--------|------|
-| Web Discovery Cluster | Header, settings |
-| Web Discovery Query | Queries list |
-| Web Discovery Query Run | Run history — via results |
+| Cluster | Header, settings |
+| Query | Queries list |
+| Run | Run history — via results |
 
 | Control | Action type | Effect | Backend |
 |---------|-------------|--------|---------|
@@ -107,16 +103,15 @@ Maps every **operator console screen** to product objects and actions. Workflow 
 
 | Purpose | Create or edit one Exa search definition |
 |---------|--------------------------------------------|
-| **Status** | Available |
 
-**Objects:** Web Discovery Query, Web Discovery Cluster (parent)
+**Objects:** Query, Cluster (parent)
 
 | Control | Action type | Effect | Backend |
 |---------|-------------|--------|---------|
 | Label, search text, search type, num results | Configure | Query fields | `web_discovery_queries` |
 | Content modes, filters | Configure | Exa parameters | JSON on query row |
 | Save | Configure | Persist query | POST or PATCH |
-| Run query | Run | Starts Web Discovery Query Run | `runs` · `source_kind=web_discovery` |
+| Run query | Run | Starts Run | `runs` · `source_kind=web_discovery` |
 | View results | Navigate | → results route | — |
 
 ---
@@ -125,22 +120,21 @@ Maps every **operator console screen** to product objects and actions. Workflow 
 
 | Purpose | Browse Search Results from a completed run |
 |---------|---------------------------------------------|
-| **Status** | Available |
 
 **Objects**
 
 | Object | Storage |
 |--------|---------|
-| Web Discovery Query Run | `runs` |
-| Search Result | `runs.engine_outputs` JSON (not a table row) |
+| Run | `runs` |
+| Search Result | `runs.engine_outputs` JSON |
 
-| Control | Action type | Effect | Status |
-|---------|-------------|--------|--------|
-| Result row expand | Read | Title, URL, Exa summary | Available |
-| OPEN URL | Navigate | External link | Available |
-| **Escalate to research** | **Escalate** | Spawns Deep Research Run | **Not implemented** (target) |
-| Dismiss result | Dismiss | Hide from view | **Not implemented** |
-| Save / bookmark | — | — | **Not implemented** |
+| Control | Action type | Effect |
+| --------- | ------------- | -------- |
+| Result row expand | Read | Title, URL, Exa summary |
+| OPEN URL | Navigate | External link |
+| **Escalate to research** | **Escalate** | Spawns Deep Research Run |
+| Dismiss result | Dismiss | Hide from view |
+| Save / bookmark | — | — |
 
 **Workflow:** [P1-01-Admin §2.8](./P1-01-admin.md) · [P1-01-Admin §5](./P1-01-admin.md)
 
@@ -150,7 +144,6 @@ Maps every **operator console screen** to product objects and actions. Workflow 
 
 | Purpose | Live pipeline event stream for one run |
 |---------|--------------------------------------|
-| **Status** | Available |
 
 **Objects:** Deep Research Run, Run Event, Engine Call, Company, Company Card (on complete)
 
@@ -169,7 +162,6 @@ Maps every **operator console screen** to product objects and actions. Workflow 
 
 | Purpose | All researched companies — operator view |
 |---------|------------------------------------------|
-| **Status** | Available |
 
 **Objects:** Company, Company Card (summary columns)
 
@@ -187,7 +179,6 @@ Shared with analyst app — same `companies` + `cards` tables.
 
 | Purpose | Full Company Card + signals + sources |
 |---------|--------------------------------------|
-| **Status** | Available |
 
 **Objects:** Company, Company Card, Research Signal, Source
 
@@ -206,7 +197,6 @@ Shared with analyst app — same `companies` + `cards` tables.
 
 | Purpose | Engine config + system health |
 |---------|------------------------------|
-| **Status** | Available |
 
 **Objects:** Research Config (`app_kv`), Engine Call (health indirect)
 
@@ -224,12 +214,12 @@ Shared with analyst app — same `companies` + `cards` tables.
 
 ## 4. Escalation actions (operator)
 
-| Action | Screen | Input | Effect | Status |
-|--------|--------|-------|--------|--------|
-| Run query / Run all | Web Discovery cluster | Web Discovery Query | Web Discovery Query Run | Available |
-| Escalate search result | Query results | Search Result | Deep Research Run | **Not implemented** |
-| Cancel run | Run log | Deep Research Run | Run stopped | Available |
-| + ADD company (analyst) | — | — | Operator does not use analyst escalations | N/A |
+| Action | Screen | Input | Effect |
+| -------- | -------- | ------- | -------- |
+| Run query / Run all | Cluster detail | Query | Run |
+| Escalate search result | Query results | Search Result | Deep Research Run |
+| Cancel run | Run log | Deep Research Run | Run stopped |
+| + ADD company (analyst) | — | — | Operator does not use analyst escalations |
 
 ---
 
@@ -237,9 +227,9 @@ Shared with analyst app — same `companies` + `cards` tables.
 
 | Object | Screens |
 |--------|---------|
-| Web Discovery Cluster | Web Discovery list, cluster detail |
-| Web Discovery Query | Cluster detail, query editor |
-| Web Discovery Query Run | Query results, run log |
+| Cluster | Cluster list, cluster detail |
+| Query | Cluster detail, query editor |
+| Run | Query results, run log |
 | Search Result | Query results (JSON) |
 | Deep Research Run | Run log, company detail (provenance) |
 | Company | Companies, company detail |
@@ -249,7 +239,7 @@ Shared with analyst app — same `companies` + `cards` tables.
 | Run Event | Run log |
 | Engine Call | Run log, settings health |
 | Research Config | Settings |
-| Web Result Escalation | Query results — Not implemented |
+| Result Escalation | Query results|
 
 ---
 
@@ -258,7 +248,7 @@ Shared with analyst app — same `companies` + `cards` tables.
 ```mermaid
 flowchart TB
     DASH[Dashboard /]
-    WD[Web Discovery /discover-web]
+    WD[Clusters /discover-web]
     WDC[Cluster /discover-web/clusters/:id]
     QED[Query editor]
     RES[Query results]
@@ -272,7 +262,7 @@ flowchart TB
     WDC --> QED
     QED --> RES
     QED -->|Run| RUN
-    RES -.->|Escalate planned| RUN
+    RES -.->|Escalate| RUN
     RUN --> COD
     CO --> COD
     WD --> CO
@@ -280,31 +270,20 @@ flowchart TB
 
 ---
 
-## 7. Repo vs target gaps
+## 7. Completion checklist
 
-| Gap | Screen | Notes |
-|-----|--------|-------|
-| Escalate on Search Result | Query results | Target: spawn `runs` research with provenance URL |
-| No user save/dismiss on results | Query results | §5 P1-01-Admin — automatic pipeline only |
-| Analyst vs operator Settings | Settings | Same route today — split by role in target |
-
----
-
-## 8. Completion checklist
-
-| Item | Status |
-|------|--------|
-| Every target admin screen listed | Done |
-| Objects per screen | Done |
-| Actions with backend where known | Done |
-| Escalate gaps flagged | Done |
-| Cross-ref P1-01-Admin | Done |
+| Item |
+|------|
+| Every admin screen listed |
+| Objects per screen |
+| Actions with backend where known |
+| Cross-ref P1-01-Admin |
 
 ---
 
-## 9. Approval
+## 8. Approval
 
-| Role | Name | Date | Status |
-|------|------|------|--------|
-| Author | Huzaifa | 2026-06-09 | Draft |
-| Reviewer | Shehrayar Haq | — | Pending |
+| Role | Name | Date |
+| ------ | ------ | ------ |
+| Author | Huzaifa | 2026-06-09 |
+| Reviewer | Shehrayar Haq | — |
