@@ -32,7 +32,6 @@ Workflow detail (what the analyst experiences step by step) lives in [P1-01-User
 | **In progress** | Screen or key actions exist but behaviour is incomplete |
 | **Planned** | Agreed for v1.0 — not built yet |
 | **TBD** | Needed for v1.0 — route and layout not yet designed |
-| **Dropped** | Removed from target product — may still exist in the repo as legacy |
 
 ### 2.2 Routes
 
@@ -67,7 +66,6 @@ Objects use [P1-02-User](./P1-02-user.md) vocabulary (Search Cluster, Article, P
 | 13 | Screener | `/screener` | — | TBD | §4.4 (post-Promote) |
 | 14 | Sources | `/sources` | — | TBD | — |
 | 15 | Settings | `/settings` | `/settings` | In progress | §7.1 |
-| — | Discovery (legacy) | `/discovery` | `/discover` (Today) | **Dropped** | — |
 
 ---
 
@@ -491,18 +489,6 @@ Objects use [P1-02-User](./P1-02-user.md) vocabulary (Search Cluster, Article, P
 **Repo today:** engine tuning (Parallel, Exa, Diffbot) — operator-only; not part of analyst target IA.
 
 **Workflow:** [P1-01-User §7.1](./P1-01-user.md#71-overview)
-
----
-
-### 4.16 Dropped — Discovery / Today (`/discovery`)
-
-| Attribute | Value |
-|-----------|-------|
-| **Status** | **Dropped** from target analyst app |
-| **Repo legacy** | `/discover` (Today) |
-| **Replacement** | Home News + Search Clusters pipeline |
-
-Not mapped. Do not build new features on this route.
 
 ---
 

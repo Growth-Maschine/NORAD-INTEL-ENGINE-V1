@@ -43,7 +43,9 @@ apps/api/logs/
 
 # ── Local/generated artifacts (do not commit) ──────────────────────────────
 .venv-migrate/
+.venv-docx/
 *.tsbuildinfo
+docs/infrastructure/
 docs/exports/
 docs/exports/*.json
 docs/exports/**/*_export*.json
@@ -52,6 +54,7 @@ docs/reports/*.docx
 docs/architecture/*.eraser
 docs/architecture/NORAD_STAKEHOLDER_DIAGRAMS.md
 scripts/build_unit_cost_report_docx.py
+scripts/build_infrastructure_report_docx.py
 scripts/dev_port.py
 scripts/export_companies_full_json.py
 /PLAN.md

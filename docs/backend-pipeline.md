@@ -13,40 +13,36 @@ and how to inspect end-to-end traces.
 
 ## 1. Two pipelines
 
-| Pipeline      | Entry point                               | Service                       | Avg cost / run |
-|---------------|-------------------------------------------|-------------------------------|----------------|
-| **Discovery** | `POST /api/discovery/runs`                | `app/services/discovery.py`   | $0.10 - $0.20  |
-| **Research**  | `POST /api/research/runs`                 | `app/services/research.py`    | $2.80 - $3.10  |
+| Pipeline | Entry point | Service / router | Avg cost / run |
+|----------|-------------|------------------|----------------|
+| **Web Discovery** | `POST /api/web-discovery/clusters/{id}/run` or query run endpoints | `app/routers/web_discovery.py` | ~$0.01–0.10 per query (Exa only) |
+| **Research** | `POST /api/research/runs` | `app/services/research.py` | $2.80–$3.10 |
 
-Both write to the same `runs`, `run_events`, and `engine_calls` tables; the
-`pipeline` field in the JSONL log distinguishes them.
+Both write to the same `runs`, `run_events`, and `engine_calls` tables; `source_kind`
+(`web_discovery` vs `research`) and the JSONL `pipeline` field distinguish them.
 
 ---
 
-## 2. Discovery pipeline (Today page)
+## 2. Web Discovery pipeline (operator)
 
-Goal: surface fresh trend articles + their extracted companies so the user has
-a daily inbox of candidates to push into deep research.
+Goal: run saved Exa searches from a **Discovery Cluster** and return **Search Results**
+for operator review (and optional escalate into deep research).
 
 ```
-Stage 1 — Exa search (trendhunter.com)        ~$0.005 × 2 queries
-Stage 2 — dedup vs existing trend_articles    (free, DB only)
-Stage 3 — Haiku 4.5 batch-rank up to 30 cands ~$0.001 / article
-Stage 4 — Exa /contents on top 15             ~$0.005 × 15 = $0.075
-Stage 5 — Sonnet 4.5 extract companies/summary~$0.01 / article
+Per Discovery Query in the run:
+  Exa search (query.search_query + query config)   ~$0.005–0.05 per query
+  Optional Exa /contents (per query flags)         varies
 ```
 
-**Models:**
-- Ranking → `claude-haiku-4-5` (cheap, fast, batch-friendly)
-- Extraction → `claude-sonnet-4-5` (same model as research synth)
+**Models:** Exa only at run time — no NORAD LLM post-run step yet (planned).
 
-**Outputs:** Rows in `trend_articles` with `relevance_score`, `summary`,
-`extracted_companies` (jsonb array of `{name, excerpt, hint_url}`).
+**Outputs:** `runs.engine_outputs` — one slice per `query_id`, each with a `results[]`
+array of Search Result objects (URL, title, snippet, Exa summary/highlights).
 
 **Where to debug:**
-- `engine_calls WHERE run_id=… AND vendor='anthropic'` — every Haiku/Sonnet
-  call with its full prompt + response
-- `apps/api/logs/pipeline.jsonl | jq 'select(.pipeline=="discovery" and .run_id=="…")'`
+- `engine_calls WHERE run_id=… AND vendor='exa'`
+- `runs.engine_outputs` JSON for serialized hits
+- `apps/api/logs/pipeline.jsonl | jq 'select(.pipeline=="web_discovery" and .run_id=="…")'`
 
 ---
 
@@ -54,9 +50,9 @@ Stage 5 — Sonnet 4.5 extract companies/summary~$0.01 / article
 
 The expensive one. Produces ONE validated `CompanyCardV1` per company.
 
-### Stage 1 — Article context (~free)
-Loads the originating `TrendArticle` if `trend_article_id` was passed.
-Binds the per-company excerpt the discovery stage extracted.
+### Stage 1 — Input context (~free)
+Optional provenance from operator escalate: source URL and parent Discovery Run id
+in `engines` JSON when research is triggered from a Search Result.
 
 ### Stage 2 — Fan-out (Parallel + Exa in parallel)
 
@@ -235,8 +231,7 @@ All overridable per-environment without touching code via the Settings page →
 ```
 apps/api/app/
   services/
-    research.py        — full research pipeline (Stages 1-4)
-    discovery.py       — Today/funnel pipeline (Stages 1-5)
+    research.py        — deep research pipeline (Stages 1–4)
     run_events.py      — emit(), set_pipeline() — tees to JSONL + DB
     settings.py        — research_config loader
   engines/
@@ -250,6 +245,9 @@ apps/api/app/
   schemas/
     common.py          — Valued, Confidence enums, Source
     company_card.py    — CompanyCardV1 root + sub-blocks
+  routers/
+    web_discovery.py   — operator Discovery Cluster / Query / Run (Exa)
+    research.py        — deep research runs
   models/
     engine_call.py     — engine_calls table (now with payload columns)
     run_event.py       — run_events table

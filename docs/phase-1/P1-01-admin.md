@@ -20,8 +20,6 @@ The **NORAD Intel Engine Admin Console** (`apps/web`) is where operators configu
 
 **Supporting admin workflow:** Settings (§7) configures research engines.
 
-**Dropped from product scope:** The **Today** page (`/discover`) and **Discovery Clusters** admin (`/discovery-clusters`) are removed from the target operator experience. Web Discovery replaces them. Legacy routes and `trend_articles` / `discovery` runs may still exist in the repo until code is removed — they are not part of this blueprint.
-
 Each workflow section uses the same format: component table → flow line → short explanation → complete pipeline diagram at the end.
 
 **Additional fields (v2.4):** Each workflow subsection may also include **What the operator is trying to do**, an **Action type** column in the component table, and a **Failure states** block before the section divider. Summary error tables (§2.11, §3.8) are unchanged.
@@ -573,8 +571,6 @@ Operators configure web search scope (clusters and queries), execute Exa searche
 | Companies | `/companies`, `/companies/:id` | Deep research output (§3.3–3.5) |
 | Run log | `/runs/:id` | Research event stream (§3.6) |
 | Settings | `/settings` | Engine config (§7) |
-
-**Dropped screens (legacy in repo):** Today (`/discover`), Discovery Clusters (`/discovery-clusters`).
 
 ### 6.4 Checklist answers
 

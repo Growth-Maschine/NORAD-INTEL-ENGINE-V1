@@ -20,8 +20,6 @@
 
 Maps every **operator console screen** to product objects and actions. Workflow narrative: [P1-01-Admin](./P1-01-admin.md). Field spec: [P1-04](./P1-04-admin.md) Part I. Schema diagrams: [P1-04 §9](./P1-04-admin.md#9-database-schema-diagrams).
 
-**Dropped from target:** Today (`/discover`), Discovery Clusters (`/discovery-clusters`). Web Discovery is the operator discovery path.
-
 ---
 
 ## 2. Screen inventory
@@ -38,8 +36,6 @@ Maps every **operator console screen** to product objects and actions. Workflow 
 | 8 | Companies list | `/companies` | Available | §3.3 |
 | 9 | Company detail | `/companies/:id` | Available | §3.4–3.5 |
 | 10 | Settings | `/settings` | Available | §7 |
-| — | Today (legacy) | `/discover` | **Dropped** | — |
-| — | Discovery Clusters (legacy) | `/discovery-clusters` | **Dropped** | — |
 
 ---
 
@@ -58,7 +54,7 @@ Maps every **operator console screen** to product objects and actions. Workflow 
 
 | Control | Action type | Effect |
 |---------|-------------|--------|
-| Start Discovery CTA | Navigate | → `/discover` legacy or Web Discovery — verify target |
+| Start Discovery CTA | Navigate | → `/discover-web` |
 | Stat cards | Read | Counts |
 
 ---
@@ -290,8 +286,6 @@ flowchart TB
 |-----|--------|-------|
 | Escalate on Search Result | Query results | Target: spawn `runs` research with provenance URL |
 | No user save/dismiss on results | Query results | §5 P1-01-Admin — automatic pipeline only |
-| Dashboard CTA → `/discover` | Dashboard | Legacy Today link — should point to Web Discovery |
-| Today / Discovery Clusters routes | Legacy | Remove from nav when code deleted |
 | Analyst vs operator Settings | Settings | Same route today — split by role in target |
 
 ---
@@ -301,7 +295,6 @@ flowchart TB
 | Item | Status |
 |------|--------|
 | Every target admin screen listed | Done |
-| Exists / Dropped status per screen | Done |
 | Objects per screen | Done |
 | Actions with backend where known | Done |
 | Escalate gaps flagged | Done |

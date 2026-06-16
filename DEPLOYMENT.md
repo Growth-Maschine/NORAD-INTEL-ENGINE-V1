@@ -27,7 +27,7 @@ npm run dev                   # http://localhost:5000
 The Vite dev server proxies `/api` and `/health` to `http://127.0.0.1:8000`,
 so you don't need to set `VITE_API_URL` locally.
 
-To process research/discovery runs you also need the arq worker:
+To process research and web discovery runs you also need the arq worker:
 
 ```bash
 cd apps/api
@@ -56,7 +56,7 @@ arq app.workers.settings.WorkerSettings
 
 ### Optional: arq worker as a second Railway service
 
-Background jobs (Today feed, research runs) need the arq worker. Add a
+Background jobs (web discovery runs, research runs) need the arq worker. Add a
 second service in the same Railway project:
 
 - Same repo, root dir `apps/api`
@@ -85,7 +85,7 @@ The schema lives in Supabase and is managed manually (no Alembic — see
 `replit.md`). For a fresh Supabase project, replay the existing DDL by
 connecting via `psql "$SUPABASE_DATABASE_URL_pool"` and creating these
 tables: `runs`, `cards`, `companies`, `signals`, `sources`, `engine_calls`,
-`run_events`, `trend_articles`, `app_kv`. Models in `apps/api/app/models/`
+`run_events`, `app_kv`. Models in `apps/api/app/models/`
 are the source of truth for column shapes.
 
 ---

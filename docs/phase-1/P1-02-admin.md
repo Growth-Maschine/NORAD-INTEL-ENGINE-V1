@@ -35,8 +35,6 @@ It is the operator-facing half of **P1-02**. Analyst-application objects (Articl
 
 Relationships are answered in [P1-03](./P1-03.md).
 
-**Dropped from product scope:** Today page (`/discover`), Discovery Clusters admin (`/discovery-clusters`), and their objects (`discovery_clusters`, `trend_articles`, `runs` · `discovery`) are legacy — not part of the target admin model. Web Discovery is the operator discovery path.
-
 ---
 
 ## 2. Cross-cutting concept — AI Analysis
@@ -328,7 +326,6 @@ An **Escalation** is an operator **choice** that moves data into the next pipeli
 | Objects from P1-01-Admin covered | Done |
 | Web Discovery vs Research runs separated | Done |
 | Search Result vs analyst Article distinguished | Done |
-| Today / Discovery Cluster objects removed (dropped) | Done |
 | AI Analysis per pipeline documented | Done |
 | Escalation objects per operator choice | Done |
 | Backend table mapping included | Done |

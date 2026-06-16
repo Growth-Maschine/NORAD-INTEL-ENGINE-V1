@@ -4,9 +4,9 @@
 |-------|-------|
 | **Document ref** | P1-04 |
 | **Title** | Required Fields per Object — Admin Console & Analyst App |
-| **Version** | 2.0 |
+| **Version** | 2.1 |
 | **Status** | Draft |
-| **Last updated** | 2026-06-09 |
+| **Last updated** | 2026-06-16 |
 | **Audience** | Internal developers, operators · BAT stakeholders, analysts (Part III) |
 | **Linear** | [GRO-269](https://linear.app/growthmaschine/issue/GRO-269/40-define-required-fields-for-each-core-object) · Parent [GRO-265](https://linear.app/growthmaschine/issue/GRO-265) |
 | **Object reference** | [P1-02-Admin](./P1-02-admin.md) · [P1-02-User](./P1-02-user.md) · [P1-03](./P1-03.md) |
@@ -36,7 +36,22 @@ Shared objects (`companies`, `cards`, `signals`, `runs`) appear in **both** Part
 | Part III Notes | `Available` · `In progress` · `Planned` (matches P1-02-User) |
 | Non-table objects | Views and actions — fields on parent tables |
 | AI Analysis | Not a table — fields on parent objects |
-| Today / `discovery` | **Dropped** — not in target model |
+
+**Cluster · Query · Run — read this first**
+
+Every discovery path uses the same three levels. Names differ by app; **do not swap them**.
+
+| Level | Meaning | Operator (Admin console) | Analyst app (planned) |
+|-------|---------|--------------------------|------------------------|
+| **Cluster** | Themed group — holds many saved searches | **Discovery Cluster** · table `web_discovery_clusters` | **Search Cluster** · table `search_clusters` |
+| **Query** | One saved Exa search inside a cluster | **Discovery Query** · table `web_discovery_queries` | **Search Query** · table `search_queries` |
+| **Run** | One execution (Run Query or Run All) | **Discovery Run** · `runs` where `source_kind = web_discovery` | **Query Run** · same `runs` table, analyst `engines` metadata |
+
+| Common mistake | Correct reading |
+|----------------|-----------------|
+| “Web query” | Means **Discovery Query** (operator) or **Search Query** (analyst) — never a cluster |
+| “Cluster query” | The **Query** inside a **Cluster** — two words, two objects |
+| “Web discovery cluster” | Product name is **Discovery Cluster**; `web_discovery_` is only the Postgres table prefix |
 
 **Part I table columns**
 
@@ -95,9 +110,11 @@ No table in MVP. Documented for post-MVP schema design.
 
 ---
 
-## 3. Web Discovery objects
+## 3. Operator discovery objects
 
-### 3.1 Web Discovery Cluster
+Admin console only. Object names below are **product terms**; Postgres table names are in each section header.
+
+### 3.1 Discovery Cluster
 
 Table: `web_discovery_clusters` · **Implemented**
 
@@ -120,16 +137,16 @@ Table: `web_discovery_clusters` · **Implemented**
 | created_at | timestamptz | Yes | No | Cluster metadata | |
 | updated_at | timestamptz | Yes | No | Internal | |
 
-### 3.2 Web Discovery Query
+### 3.2 Discovery Query
 
-Table: `web_discovery_queries` · **Implemented**
+Table: `web_discovery_queries` · **Implemented** · belongs to exactly one Discovery Cluster (`cluster_id`)
 
 | Field | Type | Required | Searchable | UI | Notes |
 |-------|------|----------|------------|-----|-------|
 | id | UUID | Yes | No | Internal | PK |
 | cluster_id | UUID | Yes | No | Internal | FK → `web_discovery_clusters.id` CASCADE |
-| label | string(160) | Yes | Yes | Query list, editor title | |
-| search_query | text | Yes | Yes | Query editor | Exa search text |
+| label | string(160) | Yes | Yes | Query list, editor title | Display name for this query (not the Exa string) |
+| search_query | text | Yes | Yes | Query editor | The Exa search string sent on Run |
 | search_type | enum (`auto`, `fast`, `deep`, `deep-lite`, `deep-reasoning`, `instant`) | Yes | No | Query editor | Default `auto` |
 | num_results | integer | Yes | No | Query editor | 1–100 · default 10 |
 | is_active | boolean | Yes | Yes | Query list | Inactive skipped on Run All |
@@ -164,16 +181,16 @@ Table: `web_discovery_queries` · **Implemented**
 | created_at | timestamptz | Yes | No | Query metadata | |
 | updated_at | timestamptz | Yes | No | Internal | |
 
-### 3.3 Web Discovery Query Run
+### 3.3 Discovery Run
 
-Table: `runs` where `source_kind = web_discovery` · **Implemented**
+Table: `runs` where `source_kind = web_discovery` · **Implemented** · executes one or more Discovery Queries from a cluster
 
 | Field | Type | Required | Searchable | UI | Notes |
 |-------|------|----------|------------|-----|-------|
 | id | UUID | Yes | No | Internal | PK |
-| source_kind | string(32) | Yes | Yes | Internal | Always `web_discovery` |
-| query | text | Yes | No | Activity log | Human label / cluster context string |
-| status | enum (`queued`, `researching`, `synthesizing`, `completed`, `failed`, `cancelled`) | Yes | Yes | Results page, Activity | Web discovery uses `queued` → `completed`/`failed` |
+| source_kind | string(32) | Yes | Yes | Internal | Always `web_discovery` for operator discovery |
+| query | text | Yes | No | Activity log | Run label — cluster name or batch context |
+| status | enum (`queued`, `researching`, `synthesizing`, `completed`, `failed`, `cancelled`) | Yes | Yes | Results page, Activity | Discovery runs: `queued` → `completed` / `failed` |
 | progress_pct | integer | Yes | No | Activity | 0–100 |
 | error | text | No | No | Results error banner | |
 | engines | JSON object | Yes | No | Internal | Snapshot: `cluster_id`, `query_ids`, Exa config |
@@ -181,8 +198,8 @@ Table: `runs` where `source_kind = web_discovery` · **Implemented**
 | idempotency_key | string(64) | No | No | Internal | Unique when set |
 | started_at | timestamptz | No | Yes | Activity, run selector | |
 | completed_at | timestamptz | No | Yes | Run selector | |
-| company_id | UUID | No | No | Internal | Null for web discovery runs |
-| card_id | UUID | No | No | Internal | Null for web discovery runs |
+| company_id | UUID | No | No | Internal | Null for discovery runs |
+| card_id | UUID | No | No | Internal | Null for discovery runs |
 | created_at | timestamptz | Yes | Yes | Run history | |
 | updated_at | timestamptz | Yes | No | Internal | |
 
@@ -232,7 +249,7 @@ Table: `runs` where `source_kind = research` · **Implemented**
 | Field | Type | Required | Searchable | UI | Notes |
 |-------|------|----------|------------|-----|-------|
 | id | UUID | Yes | No | Internal | PK |
-| source_kind | string(32) | Yes | Yes | Internal | `research` or legacy `user_query` |
+| source_kind | string(32) | Yes | Yes | Internal | `research` (also `user_query` on older rows — same pipeline) |
 | query | text | Yes | Yes | Companies Activity | Company name / URL input |
 | status | enum (see §3.3) | Yes | Yes | Companies row pill | `researching` → `synthesizing` → `completed` |
 | progress_pct | integer | Yes | No | Activity | |
@@ -251,9 +268,8 @@ Table: `runs` where `source_kind = research` · **Implemented**
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
-| source_search_result_url | string | No | Web Discovery escalate · **Planned** |
-| source_web_discovery_run_id | UUID | No | **Planned** |
-| trend_article_id | UUID | No | Legacy Today context · **Dropped** |
+| source_search_result_url | string | No | Operator escalate from Search Result · **Planned** |
+| source_web_discovery_run_id | UUID | No | Parent Discovery Run · **Planned** |
 
 ### 4.2 Company
 
@@ -408,10 +424,9 @@ All run types share `runs` columns (§3.3, §4.1). Discriminator: `source_kind`.
 
 | `source_kind` | Product object | Status |
 |---------------|----------------|--------|
-| `web_discovery` | Web Discovery Query Run | **Implemented** |
+| `web_discovery` | Discovery Run (operator or analyst Exa ingest) | **Implemented** |
 | `research` | Deep Research Run | **Implemented** |
-| `user_query` | Legacy ad-hoc research | **Implemented** — merge into `research` target |
-| `discovery` | Today pipeline | **Dropped** |
+| `user_query` | Deep Research Run (older discriminator — same as `research`) | **Implemented** |
 
 ---
 
@@ -431,9 +446,9 @@ Not a table. Post-pipeline LLM output columns:
 
 ## 8. Non-table objects (actions and views)
 
-### 8.1 Web Result Escalation
+### 8.1 Operator result escalation
 
-**No table.** Operator action on Search Result.
+**No table.** Operator action on a Search Result from a Discovery Run.
 
 | Concept | Persisted as | Notes |
 |---------|--------------|-------|
@@ -469,12 +484,11 @@ Visual layer on top of Part I field tables and [P1-03](./P1-03.md) (relationship
 |----------------|---------|
 | **Solid line** | FK exists (implemented) or planned in target schema |
 | **Dotted line** | Logical link — JSON embed, view, or provenance |
-| 🟢 | Table exists in repo today |
+| 🟢 | Table exists in repo |
 | 🔵 | Planned — not migrated yet |
 | ⬜ | View or derived — not a table |
-| 🟠 | Legacy / dropped from target |
 
-**MVP:** No `organizations` or `organization_id` until multi-tenant. **Single `runs` table** — `source_kind` discriminates behavior; analyst and operator Exa runs both use `web_discovery`, differentiated by `engines` JSON (§9.5).
+**MVP:** No `organizations` or `organization_id` until multi-tenant. **Single `runs` table** — `source_kind` plus `engines` JSON discriminates operator Discovery Runs vs analyst Query Runs (both may use `web_discovery`).
 
 ### 9.2 Master schema — all tables (target)
 
@@ -700,31 +714,29 @@ erDiagram
     }
 ```
 
-| Table | Status | Not in target |
-|-------|--------|---------------|
-| `web_discovery_clusters` | 🟢 Live | |
-| `web_discovery_queries` | 🟢 Live | |
-| `runs` | 🟢 Live | |
-| `companies` | 🟢 Live | `is_watchlisted` planned |
-| `cards` | 🟢 Live | |
-| `signals` | 🟢 Live | |
-| `sources` | 🟢 Live | |
-| `run_events` | 🟢 Live | |
-| `engine_calls` | 🟢 Live | |
-| `app_kv` | 🟢 Live | `research_config` key |
-| `discovery_clusters` | 🟠 Legacy | Today — **dropped** |
-| `trend_articles` | 🟠 Legacy | Today — **dropped** |
+| Table | Status |
+|-------|--------|
+| `web_discovery_clusters` | 🟢 Live |
+| `web_discovery_queries` | 🟢 Live |
+| `runs` | 🟢 Live |
+| `companies` | 🟢 Live |
+| `cards` | 🟢 Live |
+| `signals` | 🟢 Live |
+| `sources` | 🟢 Live |
+| `run_events` | 🟢 Live |
+| `engine_calls` | 🟢 Live |
+| `app_kv` | 🟢 Live |
 
 ### 9.4 Diagram by product area
 
-#### Web Discovery (operator)
+#### Discovery (operator)
 
 ```mermaid
 flowchart TB
     subgraph Tables["Postgres tables"]
-        WDC[web_discovery_clusters]
-        WDQ[web_discovery_queries]
-        RUNS[(runs)]
+        DC[Discovery Cluster<br/>web_discovery_clusters]
+        DQ[Discovery Query<br/>web_discovery_queries]
+        RUNS[(Discovery Run<br/>runs)]
     end
 
     subgraph JSON["Inside runs.engine_outputs"]
@@ -733,8 +745,8 @@ flowchart TB
         ITEM["Search Result objects"]
     end
 
-    WDC -->|cluster_id CASCADE| WDQ
-    WDQ -->|Run Query / Run All| RUNS
+    DC -->|cluster_id CASCADE| DQ
+    DQ -->|Run Query / Run All| RUNS
     RUNS --> SLICE
     SLICE --> SR
     SR --> ITEM
@@ -822,7 +834,7 @@ flowchart LR
 | Pending Review | `cards.review_status = 'draft'` joined to `companies` |
 | Watchlist | `companies.is_watchlisted` or `watchlist_entries` |
 | Opportunity | Weekly query over `articles` + `signals` + `monitoring_rules` |
-| Web Result Escalate | `INSERT INTO runs (source_kind='research', engines→provenance)` |
+| Operator result escalate | `INSERT INTO runs (source_kind='research', engines→provenance)` |
 
 ### 9.5 `runs` polymorphism
 
@@ -832,31 +844,29 @@ flowchart TD
 
     RUNS --> WD[source_kind = web_discovery]
     RUNS --> RS[source_kind = research]
-    RUNS --> UQ[source_kind = user_query legacy]
+    RUNS --> UQ[source_kind = user_query]
 
-    WD --> WDO[Operator Web Discovery]
+    WD --> OPR[Operator Discovery Run]
     WD --> ANA[Analyst Query Run]
 
-    WDO --> |engines.cluster_id| WDC[web_discovery_clusters]
-    WDO --> |engines.query_ids| WDQ[web_discovery_queries]
-    WDO --> OUT1[engine_outputs → Search Results]
+    OPR --> |engines.cluster_id| DC[Discovery Cluster]
+    OPR --> |engines.query_ids| DQ[Discovery Query]
+    OPR --> OUT1[engine_outputs → Search Results]
 
-    ANA --> |engines.search_cluster_id planned| SC[search_clusters]
-    ANA --> |engines.search_query_id planned| SQ[search_queries]
+    ANA --> |engines.search_cluster_id planned| SC[Search Cluster]
+    ANA --> |engines.search_query_id planned| SQ[Search Query]
     ANA --> OUT2[engine_outputs → Article candidates]
 
     RS --> OUT3[companies + cards + signals + sources]
     UQ --> OUT3
-
-    DISC[source_kind = discovery] -.->|DROPPED| TA[trend_articles legacy]
 ```
 
 | `source_kind` | Who triggers | `engines` discriminator | Output |
 |---------------|--------------|-------------------------|--------|
-| `web_discovery` | Operator | `web_discovery_cluster_id`, `query_id(s)` | Search Results JSON |
+| `web_discovery` | Operator | `cluster_id`, `query_id(s)` | Search Results JSON |
 | `web_discovery` | Analyst | `search_cluster_id`, `search_query_id` | Articles ingest |
 | `research` | Escalate / +ADD / bookmark / API | `company_name`, provenance URLs | Company + Card |
-| `discovery` | — | **Dropped** | Legacy `trend_articles` |
+| `user_query` | Same as `research` | Same | Company + Card |
 
 ### 9.6 Composite foreign keys
 
@@ -907,7 +917,7 @@ erDiagram
 flowchart LR
     subgraph Operator["Admin console"]
         direction TB
-        A1[Web Discovery Cluster]
+        A1[Discovery Cluster]
         A2[Run Exa]
         A3[Search Results]
         A4[Escalate]
@@ -976,9 +986,11 @@ Single-tenant in the first release — one implicit organization, no separate or
 
 ## 11. Analyst — Discovery and feed objects
 
+Same **Cluster → Query → Run** pattern as §1 (operator uses **Discovery** names; analyst uses **Search** names). Analyst objects are **planned** unless marked otherwise.
+
 ### 11.1 Search Cluster
 
-**Status:** Planned · Settings → Clusters
+**Status:** Planned · Settings → Clusters · table `search_clusters`
 
 | Field | Type | Required | Searchable | UI | Notes |
 |-------|------|----------|------------|-----|-------|
@@ -1000,14 +1012,14 @@ Single-tenant in the first release — one implicit organization, no separate or
 
 ### 11.2 Search Query
 
-**Status:** Planned
+**Status:** Planned · table `search_queries` · one saved search inside a Search Cluster
 
 | Field | Type | Required | Searchable | UI | Notes |
 |-------|------|----------|------------|-----|-------|
 | id | identifier | Yes | No | — | |
-| cluster | link to Search Cluster | Yes | No | — | Parent theme |
-| name | text | Yes | Yes | Query list | Short label |
-| query_text | text | Yes | Yes | Query editor | Search string |
+| cluster | link to Search Cluster | Yes | No | — | Parent cluster — not a query |
+| name | text | Yes | Yes | Query list | Short label for this search |
+| query_text | text | Yes | Yes | Query editor | Exa search string |
 | parameters | settings object | No | No | Query editor | Advanced search options · **Planned** |
 | is_active | yes/no | Yes | Yes | Query list | |
 | created_at | date-time | Yes | No | Query metadata | |
@@ -1015,13 +1027,13 @@ Single-tenant in the first release — one implicit organization, no separate or
 
 ### 11.3 Query Run (analyst)
 
-**Status:** Planned · background job when analyst runs a cluster query
+**Status:** Planned · one execution when analyst runs a Search Query · stored in `runs` (`source_kind = web_discovery`, analyst `engines` metadata)
 
 | Field | Type | Required | Searchable | UI | Notes |
 |-------|------|----------|------------|-----|-------|
 | id | identifier | Yes | No | — | |
-| cluster | link to Search Cluster | Yes | No | — | Which theme was run |
-| query | link to Search Query | Yes | No | — | Which search string was run |
+| cluster | link to Search Cluster | Yes | No | — | Which cluster was run |
+| query | link to Search Query | Yes | No | — | Which saved search was executed |
 | status | running / completed / failed | Yes | No | — | |
 | started_at | date-time | No | No | — | |
 | completed_at | date-time | No | No | — | |
@@ -1224,7 +1236,7 @@ flowchart TB
 
 | Step | What happens |
 |------|----------------|
-| Run cluster query | System fetches new Articles into News and Signals |
+| Run Search Query | System fetches new Articles into News and Signals |
 | Monitoring Rule | Filters which Articles and Opportunities surface on Home |
 | + ADD on Article | Deep research builds a Company Profile → Pending Review |
 | Promote | Company joins Watchlist for ongoing monitoring |
@@ -1253,5 +1265,5 @@ Also: [P1-02-User §11](./P1-02-user.md#11-how-objects-connect-overview)
 
 | Role | Name | Date | Status |
 |------|------|------|--------|
-| Author | Huzaifa | 2026-06-09 | Draft |
+| Author | Huzaifa | 2026-06-16 | Draft v2.1 |
 | Reviewer | Shehrayar Haq | — | Pending |
