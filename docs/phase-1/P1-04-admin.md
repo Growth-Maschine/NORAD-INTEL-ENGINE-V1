@@ -69,7 +69,7 @@ Object definitions: [P1-02-Admin](./P1-02-admin.md). Workflows: [P1-01-Admin](./
 
 ## 2. Platform objects
 
-### 2.1 Organization **
+### 2.1 Organization
 
 No table in MVP. Documented for post-MVP schema design.
 
@@ -81,7 +81,7 @@ No table in MVP. Documented for post-MVP schema design.
 | created_at | timestamptz | Yes | No | Internal ||
 | updated_at | timestamptz | Yes | No | Internal ||
 
-### 2.2 User **
+### 2.2 User
 
 | Field | Type | Required | Searchable | UI | Notes |
 |-------|------|----------|------------|-----|-------|
@@ -223,9 +223,11 @@ Table: `runs` where `source_kind = web_discovery` · executes one or more Querie
 | source_run_id | UUID | Yes | No | Internal | Parent run · when promoted to row |
 | source_query_id | UUID | Yes | No | Internal | Parent query |
 
-### 3.5 Article **
+### 3.5 Article
 
-Table: `articles` ·| Field | Type | Required | Searchable | UI | Notes |
+Table: `articles`
+
+| Field | Type | Required | Searchable | UI | Notes |
 |-------|------|----------|------------|-----|-------|
 | id | UUID | Yes | No | Internal | PK |
 | url | text | Yes | Yes | Analyst News row | Unique |
@@ -244,9 +246,11 @@ Table: `articles` ·| Field | Type | Required | Searchable | UI | Notes |
 | created_at | timestamptz | Yes | No | Internal | |
 | updated_at | timestamptz | Yes | No | Internal | |
 
-### 3.6 News Signal **
+### 3.6 News Signal
 
-Table: `article_signals` ·| Field | Type | Required | Searchable | UI | Notes |
+Table: `article_signals`
+
+| Field | Type | Required | Searchable | UI | Notes |
 |-------|------|----------|------------|-----|-------|
 | id | UUID | Yes | No | Internal | PK |
 | article_id | UUID | Yes | No | Internal | FK → `articles.id` |
@@ -781,7 +785,7 @@ flowchart TB
     PR -->|Promote| WL[watchlist_entries]
 ```
 
-#### Analyst News feed **
+#### Analyst News feed
 
 ```mermaid
 flowchart TB
