@@ -7,22 +7,25 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.db import get_session_factory
 from app.core.db import get_session
-from app.engines import get_exa_client
-from app.engines.exa_client import coerce_exa_highlights, serialize_exa_search_result
-from app.engines.logging import log_exa_call
+from app.engines.exa_client import coerce_exa_highlights
+from app.models.article import Article
 from app.models.engine_call import EngineCall
 from app.models.run import Run
 from app.models.web_discovery_cluster import WebDiscoveryCluster
 from app.models.web_discovery_query import WebDiscoveryQuery
-from app.services.run_events import emit, set_pipeline
-from app.services.discovery_clusters import slugify
+from app.services.run_events import emit
+from app.services.web_discovery import (
+    clean_reading_text,
+    normalize_article_url,
+    safe_execute_web_discovery_run,
+)
+from app.utils.slug import slugify
 
 router = APIRouter(prefix="/api/web-discovery", tags=["web-discovery"])
 logger = logging.getLogger(__name__)
@@ -213,6 +216,11 @@ class WebDiscoveryResultItem(BaseModel):
     image: str | None = None
     favicon: str | None = None
     author: str | None = None
+    article_id: uuid.UUID | None = None
+    ingest_status: str | None = None
+    executive_summary: str | None = None
+    mentioned_companies: list[dict[str, Any]] = Field(default_factory=list)
+    enriched: bool | None = None
 
 
 class WebDiscoveryQueryResultsOut(BaseModel):
@@ -618,7 +626,7 @@ async def start_web_discovery_cluster_run(
     )
 
     asyncio.create_task(
-        _safe_execute_web_discovery_run(run.id, cluster.id, only_query_id=target_query_id)
+        safe_execute_web_discovery_run(run.id, cluster.id, only_query_id=target_query_id)
     )
 
     return WebDiscoveryRunCreated(
@@ -737,41 +745,6 @@ async def create_web_discovery_query(
     return _query_out(query)
 
 
-def _exa_search_type(raw: str) -> tuple[str, str | None]:
-    """Map UI search type to Exa client search/deep model knobs."""
-    value = (raw or "auto").strip().lower()
-    if value in {"instant", "fast"}:
-        return "fast", None
-    if value in {"deep", "deep-lite", "deep-reasoning"}:
-        return "deep", value
-    return "auto", None
-
-
-def _exa_contents_for_query(q: WebDiscoveryQuery) -> dict[str, Any] | None:
-    """Build Exa /search `contents` block from saved query controls."""
-    contents: dict[str, Any] = {}
-    if q.content_highlights:
-        highlights: Any = True
-        if q.highlights_guiding_query or q.highlights_max_chars is not None:
-            highlights = {}
-            if q.highlights_guiding_query:
-                highlights["query"] = q.highlights_guiding_query
-            if q.highlights_max_chars is not None:
-                highlights["maxCharacters"] = q.highlights_max_chars
-        contents["highlights"] = highlights
-    if q.content_text:
-        text: Any = True
-        if q.text_max_chars is not None:
-            text = {"maxCharacters": q.text_max_chars}
-        contents["text"] = text
-    if q.content_summary:
-        summary: Any = True
-        if q.summary_max_chars is not None:
-            summary = {"maxCharacters": q.summary_max_chars}
-        contents["summary"] = summary
-    return contents or None
-
-
 def _normalize_result_items(raw: Any) -> list[dict[str, Any]]:
     if not isinstance(raw, list):
         return []
@@ -780,6 +753,7 @@ def _normalize_result_items(raw: Any) -> list[dict[str, Any]]:
         if not isinstance(item, dict) or not item.get("url"):
             continue
         highlights = coerce_exa_highlights(item.get("highlights"))
+        companies = item.get("mentioned_companies")
         out.append(
             {
                 "url": str(item["url"]),
@@ -794,9 +768,73 @@ def _normalize_result_items(raw: Any) -> list[dict[str, Any]]:
                 "image": item.get("image"),
                 "favicon": item.get("favicon"),
                 "author": item.get("author"),
+                "article_id": item.get("article_id"),
+                "ingest_status": item.get("ingest_status"),
+                "executive_summary": item.get("executive_summary"),
+                "mentioned_companies": companies if isinstance(companies, list) else [],
+                "enriched": item.get("enriched"),
             }
         )
     return out
+
+
+async def _hydrate_results_from_articles(
+    session: AsyncSession,
+    results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge canonical article enrich + body from `articles` (source of truth)."""
+    if not results:
+        return results
+
+    urls = [normalize_article_url(str(r["url"])) for r in results if r.get("url")]
+    article_ids: list[uuid.UUID] = []
+    for row in results:
+        raw_id = row.get("article_id")
+        if not raw_id:
+            continue
+        try:
+            article_ids.append(raw_id if isinstance(raw_id, uuid.UUID) else uuid.UUID(str(raw_id)))
+        except (TypeError, ValueError):
+            continue
+
+    filters = []
+    if urls:
+        filters.append(Article.url.in_(urls))
+    if article_ids:
+        filters.append(Article.id.in_(article_ids))
+    if not filters:
+        return results
+
+    rows = (await session.execute(select(Article).where(or_(*filters)))).scalars().all()
+    by_url = {a.url: a for a in rows}
+    by_id = {a.id: a for a in rows}
+
+    for row in results:
+        art: Article | None = None
+        raw_id = row.get("article_id")
+        if raw_id:
+            try:
+                aid = raw_id if isinstance(raw_id, uuid.UUID) else uuid.UUID(str(raw_id))
+                art = by_id.get(aid)
+            except (TypeError, ValueError):
+                art = None
+        if art is None and row.get("url"):
+            art = by_url.get(normalize_article_url(str(row["url"])))
+        if art is None:
+            continue
+
+        row["article_id"] = art.id
+        if art.summary:
+            row["executive_summary"] = art.summary
+            row["enriched"] = True
+        if art.mentioned_companies:
+            row["mentioned_companies"] = list(art.mentioned_companies)
+        if art.body_text:
+            row["text"] = clean_reading_text(art.body_text)
+        if not row.get("ingest_status"):
+            row["ingest_status"] = "created"
+
+    return results
 
 
 def _query_slice_from_run(run: Run, query_id: uuid.UUID) -> dict[str, Any] | None:
@@ -850,207 +888,6 @@ async def _query_run_list_for_row(
         if len(out) >= max(1, min(limit, 50)):
             break
     return out
-
-
-async def _execute_web_discovery_run(
-    run_id: uuid.UUID,
-    cluster_id: uuid.UUID,
-    only_query_id: uuid.UUID | None = None,
-) -> None:
-    """Execute all active queries for a web-discovery cluster in background."""
-    set_pipeline("discovery")
-    factory = get_session_factory()
-    exa = get_exa_client()
-
-    async with factory() as s:
-        run = await s.get(Run, run_id)
-        if run is None:
-            raise RuntimeError(f"run {run_id} not found")
-        cluster = await s.get(WebDiscoveryCluster, cluster_id)
-        if cluster is None:
-            raise RuntimeError(f"cluster {cluster_id} not found")
-        queries = (
-            await s.execute(
-                select(WebDiscoveryQuery)
-                .where(
-                    WebDiscoveryQuery.cluster_id == cluster_id,
-                    WebDiscoveryQuery.is_active.is_(True),
-                )
-                .order_by(WebDiscoveryQuery.created_at.asc())
-            )
-        ).scalars().all()
-        if only_query_id is not None:
-            queries = [q for q in queries if q.id == only_query_id]
-        run.status = "researching"
-        run.started_at = datetime.now(timezone.utc)
-        run.progress_pct = 5
-        await s.commit()
-
-    await emit(
-        run_id,
-        "run_started",
-        f"Web discovery run started for cluster '{cluster.name}' with {len(queries)} active queries.",
-        meta={
-            "cluster_id": str(cluster_id),
-            "query_count": len(queries),
-            "only_query_id": str(only_query_id) if only_query_id else None,
-        },
-    )
-
-    if not queries:
-        async with factory() as s:
-            run = await s.get(Run, run_id)
-            if run is not None:
-                run.status = "failed"
-                run.progress_pct = 100
-                run.error = "No active queries in cluster."
-                run.completed_at = datetime.now(timezone.utc)
-                await s.commit()
-        await emit(run_id, "run_failed", "No active queries in cluster.", level="error")
-        return
-
-    total_cost = 0.0
-    total_results = 0
-    query_summaries: list[dict[str, Any]] = []
-
-    for index, query in enumerate(queries, start=1):
-        await emit(
-            run_id,
-            "query_started",
-            f"Running query {index}/{len(queries)}: {query.label}",
-            meta={"query_id": str(query.id), "label": query.label},
-        )
-        mapped_type, deep_model = _exa_search_type(query.search_type)
-        exa_contents = _exa_contents_for_query(query)
-        results, stats = await exa.search(
-            query.search_query,
-            include_domains=list(query.include_domains or []) or None,
-            exclude_domains=list(query.exclude_domains or []) or None,
-            start_published_date=query.published_after,
-            end_published_date=query.published_before,
-            num_results=query.num_results,
-            category=query.category,
-            search_type=mapped_type,
-            deep_model=deep_model,
-            contents=exa_contents,
-        )
-        serialized = [serialize_exa_search_result(r) for r in results]
-
-        async with factory() as s:
-            await log_exa_call(
-                s,
-                stats,
-                run_id=run_id,
-                meta={
-                    "pipeline": "web_discovery",
-                    "query_id": str(query.id),
-                    "query_label": query.label,
-                    "search_type": query.search_type,
-                },
-                request_payload={
-                    "query": query.search_query,
-                    "search_type": query.search_type,
-                    "num_results": query.num_results,
-                    "contents": exa_contents,
-                },
-                response_payload={
-                    "result_count": len(serialized),
-                    "results": serialized,
-                },
-            )
-
-        total_cost += float(stats.cost_usd or 0.0)
-        total_results += len(results)
-        query_summaries.append(
-            {
-                "query_id": str(query.id),
-                "label": query.label,
-                "status": stats.status,
-                "result_count": len(results),
-                "latency_ms": stats.latency_ms,
-                "cost_usd": stats.cost_usd,
-                "error": stats.error,
-                "results": serialized,
-            }
-        )
-        await emit(
-            run_id,
-            "query_completed",
-            f"{query.label}: {len(results)} results ({stats.status})",
-            level="warn" if stats.status != "ok" else "info",
-            meta=query_summaries[-1],
-        )
-
-        progress = min(95, 5 + int((index / len(queries)) * 85))
-        async with factory() as s:
-            run = await s.get(Run, run_id)
-            if run is not None:
-                run.progress_pct = progress
-                run.engine_outputs = {
-                    "pipeline": "web_discovery",
-                    "cluster_id": str(cluster_id),
-                    "query_count": len(queries),
-                    "completed_queries": index,
-                    "total_results": total_results,
-                    "total_cost_usd": round(total_cost, 4),
-                    "queries": query_summaries,
-                }
-                await s.commit()
-
-    async with factory() as s:
-        run = await s.get(Run, run_id)
-        cluster = await s.get(WebDiscoveryCluster, cluster_id)
-        if run is not None:
-            run.status = "completed"
-            run.progress_pct = 100
-            run.completed_at = datetime.now(timezone.utc)
-            run.error = None
-            run.engine_outputs = {
-                "pipeline": "web_discovery",
-                "cluster_id": str(cluster_id),
-                "query_count": len(queries),
-                "completed_queries": len(queries),
-                "total_results": total_results,
-                "total_cost_usd": round(total_cost, 4),
-                "queries": query_summaries,
-            }
-        if cluster is not None:
-            cluster.last_run_at = datetime.now(timezone.utc)
-            cluster.signal_count = total_results
-        await s.commit()
-
-    await emit(
-        run_id,
-        "run_completed",
-        f"Web discovery completed: {len(queries)} queries, {total_results} results.",
-        meta={
-            "cluster_id": str(cluster_id),
-            "query_count": len(queries),
-            "total_results": total_results,
-            "total_cost_usd": round(total_cost, 4),
-        },
-    )
-
-
-async def _safe_execute_web_discovery_run(
-    run_id: uuid.UUID,
-    cluster_id: uuid.UUID,
-    only_query_id: uuid.UUID | None = None,
-) -> None:
-    try:
-        await _execute_web_discovery_run(run_id, cluster_id, only_query_id=only_query_id)
-    except Exception as exc:  # pragma: no cover
-        logger.exception("web-discovery run crashed (run_id=%s): %s", run_id, exc)
-        factory = get_session_factory()
-        async with factory() as s:
-            run = await s.get(Run, run_id)
-            if run is not None:
-                run.status = "failed"
-                run.progress_pct = 100
-                run.error = f"{type(exc).__name__}: {exc}"
-                run.completed_at = datetime.now(timezone.utc)
-                await s.commit()
-        await emit(run_id, "run_failed", str(exc), level="error")
 
 
 @router.get("/queries/{query_id}", response_model=WebDiscoveryQueryOut)
@@ -1145,6 +982,8 @@ async def get_web_discovery_query_results(
         if call and isinstance(call.response_payload, dict):
             results = _normalize_result_items(call.response_payload.get("results"))
 
+    results = await _hydrate_results_from_articles(session, results)
+
     content_modes: list[str] = []
     if row.content_highlights:
         content_modes.append("highlights")
@@ -1236,3 +1075,96 @@ async def delete_web_discovery_query(
     await session.delete(row)
     await session.commit()
     return {"ok": True}
+
+
+class ArticleOut(BaseModel):
+    id: uuid.UUID
+    url: str
+    title: str
+    summary: str | None
+    body_text: str | None
+    source_name: str | None
+    published_at: datetime | None
+    ingested_at: datetime
+    cluster_id: uuid.UUID | None
+    query_run_id: uuid.UUID | None
+    source_query_id: uuid.UUID | None
+    category_tag: str | None
+    priority_score: int | None
+    mentioned_companies: list[dict[str, Any]]
+    source_metadata: dict[str, Any]
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+def _article_out(row: Article) -> ArticleOut:
+    return ArticleOut(
+        id=row.id,
+        url=row.url,
+        title=row.title,
+        summary=row.summary,
+        body_text=row.body_text,
+        source_name=row.source_name,
+        published_at=row.published_at,
+        ingested_at=row.ingested_at,
+        cluster_id=row.cluster_id,
+        query_run_id=row.query_run_id,
+        source_query_id=row.source_query_id,
+        category_tag=row.category_tag,
+        priority_score=row.priority_score,
+        mentioned_companies=list(row.mentioned_companies or []),
+        source_metadata=dict(row.source_metadata or {}),
+        status=row.status,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+@router.get("/articles", response_model=list[ArticleOut])
+async def list_articles(
+    cluster_id: uuid.UUID | None = Query(None),
+    query_run_id: uuid.UUID | None = Query(None),
+    source_query_id: uuid.UUID | None = Query(None),
+    status: str = Query("active"),
+    limit: int = Query(50, ge=1, le=200),
+    session: AsyncSession = Depends(get_session),
+) -> list[ArticleOut]:
+    stmt = select(Article).order_by(Article.ingested_at.desc()).limit(limit)
+    if status != "all":
+        stmt = stmt.where(Article.status == status)
+    if cluster_id is not None:
+        stmt = stmt.where(Article.cluster_id == cluster_id)
+    if query_run_id is not None:
+        stmt = stmt.where(Article.query_run_id == query_run_id)
+    if source_query_id is not None:
+        stmt = stmt.where(Article.source_query_id == source_query_id)
+    rows = (await session.execute(stmt)).scalars().all()
+    return [_article_out(r) for r in rows]
+
+
+@router.get("/articles/{article_id}", response_model=ArticleOut)
+async def get_article(
+    article_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> ArticleOut:
+    row = await session.get(Article, article_id)
+    if row is None:
+        raise HTTPException(404, "article not found")
+    return _article_out(row)
+
+
+@router.post("/articles/{article_id}/dismiss", response_model=ArticleOut)
+async def dismiss_article(
+    article_id: uuid.UUID,
+    x_admin_token: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_session),
+) -> ArticleOut:
+    _require_admin_in_prod(x_admin_token)
+    row = await session.get(Article, article_id)
+    if row is None:
+        raise HTTPException(404, "article not found")
+    row.status = "dismissed"
+    await session.commit()
+    await session.refresh(row)
+    return _article_out(row)

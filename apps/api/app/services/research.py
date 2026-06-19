@@ -2,7 +2,7 @@
 
 For one chosen company, this service runs the full Company-Card synthesis:
 
-    Stage 1  build_input            — read trend_article context (if any),
+    Stage 1  build_input            — assemble research input from params,
                                        normalize company name + domain hint
     Stage 2  fan_out (gather)       — Parallel + Exa + Diffbot KG run together.
                                        When `domain_hint` is known up front all
@@ -80,7 +80,7 @@ from app.engines.logging import (
     log_parallel_call,
 )
 from app.engines.parallel_client import ParallelTaskResponse
-from app.models import Card, Company, Run, Signal, Source, TrendArticle
+from app.models import Card, Company, Run, Signal, Source
 from app.schemas import CompanyCardV1, get_contract_schema
 from app.schemas.common import Source as SourceSchema
 from app.services.run_events import emit, set_pipeline
@@ -109,7 +109,6 @@ SYNTH_TIMEOUT_S = 300.0
 class ResearchParams:
     company_name: str
     domain_hint: str | None = None
-    trend_article_id: uuid.UUID | None = None
     company_id: uuid.UUID | None = None  # if re-researching an existing company
 
 
@@ -145,7 +144,6 @@ async def execute_research(run_id: uuid.UUID, p: ResearchParams) -> ResearchResu
         meta={
             "company_name": p.company_name,
             "domain_hint": p.domain_hint,
-            "trend_article_id": str(p.trend_article_id) if p.trend_article_id else None,
         },
     )
 
@@ -157,14 +155,13 @@ async def execute_research(run_id: uuid.UUID, p: ResearchParams) -> ResearchResu
             cfg = await get_research_config(s)
 
         # ── Stage 1: build research input ─────────────────────────────────
-        article_ctx = await _stage1_load_article_context(p, factory)
+        article_ctx = None
         await _update_run(factory, run_id, progress=15)
         await emit(
             run_id,
             "stage_completed",
-            "Stage 1 — built research input"
-            + (f" with article context ({article_ctx.source!r})" if article_ctx else ""),
-            meta={"stage": 1, "has_article_ctx": bool(article_ctx)},
+            "Stage 1 — built research input",
+            meta={"stage": 1, "has_article_ctx": False},
         )
 
         # ── Stage 2: fan-out (Parallel + Exa + Diffbot) ───────────────────
@@ -406,31 +403,6 @@ class _ArticleContext:
     summary: str | None
     url: str
     source: str
-
-
-async def _stage1_load_article_context(
-    p: ResearchParams,
-    factory: async_sessionmaker[AsyncSession],
-) -> _ArticleContext | None:
-    if not p.trend_article_id:
-        return None
-    async with factory() as s:
-        article = await s.get(TrendArticle, p.trend_article_id)
-        if article is None:
-            return None
-        # Bind in the article excerpt for the named company if we have it.
-        excerpt = None
-        for c in article.extracted_companies or []:
-            if (c.get("name") or "").lower() == p.company_name.lower():
-                excerpt = c.get("excerpt")
-                break
-        return _ArticleContext(
-            article_id=article.id,
-            title=article.title,
-            summary=excerpt or article.summary,
-            url=article.url,
-            source=article.source or "trendhunter",
-        )
 
 
 # ── Stage 2a: Parallel ───────────────────────────────────────────────────────
