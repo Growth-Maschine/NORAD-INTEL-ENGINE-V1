@@ -123,17 +123,18 @@ Legacy drafts also described Home/News, Pending review, Watchlist — **not in t
 
 | Attribute | Value |
 |-----------|-------|
-| **Purpose** | Browse researched companies; open profiles |
+| **Purpose** | **Profiles** tab — browse researched companies and in-flight runs; **Discovered** tab — browse Sonnet mentions from articles |
 | **Sidebar label** | Companies |
 
-**Objects:** Company, Company Profile (summary columns), Deep Research Run (in-flight **Profiling…** pill)
+**Objects:** Company, Company Profile (Profiles tab); Company mention (Discovered tab); Deep Research Run (in-flight **Profiling…** pill on Profiles)
 
 | Control | Action type | Effect |
 |---------|-------------|--------|
-| Table row | Navigate | → `/companies/:id` |
+| Profiles / Discovered tabs | Navigate | Switch feed |
+| Table row (Profiles) | Navigate | → `/companies/:id` when profiled |
+| **Deep research** (Discovered) | Research | Starts run with `company_id` → Run log; row appears on Profiles tab |
 | Search / filter | Filter | List subset |
 | Status pill | Read | Run state / review_status |
-| Add company (if exposed) | Research | Manual Deep research |
 
 **Workflow:** [P1-01-User §4.1](./P1-01-user.md)
 

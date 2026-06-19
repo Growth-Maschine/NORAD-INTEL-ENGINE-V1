@@ -170,15 +170,18 @@ Maps every **operator screen** in the single NORAD app to product objects and ac
 
 ### 3.7 Companies list (`/companies`)
 
-| Purpose | All researched companies — operator view |
-|---------|------------------------------------------|
+| Purpose | Researched companies (Profiles tab) + Web Discovery mentions (Discovered tab) |
+|---------|-------------------------------------------------------------------------------|
 
-**Objects:** Company, Company Card (summary columns)
+**Objects:** Company, Company Card (Profiles); Company mention row (Discovered)
 
 | Control | Action type | Effect |
 |---------|-------------|--------|
-| Table row | Navigate | → company detail |
-| Search / filter | Filter | List subset |
+| **Profiles** tab | Navigate | Research feed — live runs + completed cards (`GET /api/research/feed`) |
+| **Discovered** tab | Navigate | Mention rows from articles (`GET /api/research/discovered`) |
+| Table row | Navigate | → company detail when profiled |
+| **Deep research** (Discovered) | Run | `POST /api/research/runs` with `company_id` |
+| Search / filter | Filter | List subset (Discovered: cluster, has_profile) |
 | Review status pill | Read | draft / accepted / rejected |
 
 Shared with analyst journey — same `companies` + `cards` tables on `/companies`.

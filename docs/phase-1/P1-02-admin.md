@@ -56,7 +56,7 @@ Relationships are answered in [P1-03](./P1-03.md).
 
 | Pipeline | Stage | Model | Persisted to |
 |----------|-------|-------|--------------|
-| Web Discovery | Enrich (per new article) | Claude Sonnet | `articles.summary`, `articles.mentioned_companies`; mirrored in `runs.engine_outputs` |
+| Web Discovery | Enrich (per new article) | Claude Sonnet | `articles.summary`, `articles.mentioned_companies` (+ `company_id` each); **`companies` rows** (`origin=web_discovery`, `source_article_id`); mirrored in `runs.engine_outputs` |
 | Deep Research | Synthesise | Claude Sonnet 4.5 | `cards.card`, `signals` |
 
 **Not executed today:** per-query `system_prompt` / `output_schema` on `web_discovery_queries` — saved in DB only.
@@ -190,11 +190,11 @@ Runs in-process via `asyncio.create_task` — no separate worker.
 
 | | |
 |--|--|
-| **What** | Canonical company entity — name, domain, denormalised scores |
-| **Why** | Stable id across multiple research runs and cards |
-| **Example** | Ultra Pouches — domain `takeultra.com` — `canonical_card_id` pointer |
-| **Backend** | `companies` — unique on `domain` (lowercased apex) |
-| **Where in UI** | `/companies` list and `/companies/:id` detail |
+| **What** | Canonical company entity — name, domain, denormalised scores; **or** a lightweight Web Discovery mention before full profile |
+| **Why** | Stable id from first Sonnet mention through Deep Research completion |
+| **Example** | Ultra Pouches — first appears as `origin=web_discovery` from an article; after Deep Research → `origin=research`, `canonical_card_id` set |
+| **Backend** | `companies` — unique on `domain` (nullable); unique on `(source_article_id, normalized_name)` for discovery rows |
+| **Where in UI** | `/companies` **Profiles** tab (research feed) and **Discovered** tab (mention rows); `/companies/:id` detail |
 
 ### 6.3 Company Card
 
@@ -276,7 +276,7 @@ These are **choices** that spawn runs or update state. None are standalone table
 
 | | |
 |--|--|
-| **What** | User starts Deep Research from a company mentioned in a Web Discovery result |
+| **What** | User starts Deep Research from a company mentioned in a Web Discovery result or the **Discovered** tab |
 | **Why** | Primary discovery → research path |
 | **Example** | Click **Deep research** on “Ultra Pouches” in Companies in this story → `POST /api/research/runs` |
 | **Backend** | New `runs` row · `source_kind = research` |

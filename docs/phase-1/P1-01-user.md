@@ -89,7 +89,7 @@ Each result card is one web source (URL). After a successful run, cards show **E
 | **Previously ingested** badge | Read | Read | URL already in `articles` — summary from existing row |
 | **Executive summary** | Read | Read | Sonnet paragraph tied to the search query |
 | **Companies in this story** | Read list | Read | Name, role, context, industry/market hints |
-| **Deep research** | Click per company | **Research** | Starts Company Card pipeline → `/runs/:id` |
+| **Deep research** | Click per company | **Research** | `POST /api/research/runs` with `company_id` → `/runs/:id`; row also appears on **Companies → Profiles** |
 | **Full article** | Expand section | Read | Formatted paragraphs from crawled body |
 | **Source excerpts (Exa)** | Read | Read | Only when no executive summary (fallback) |
 | **Limited content** warning | Read | Read | Query needs Highlights or Full text enabled |
@@ -99,7 +99,7 @@ Each result card is one web source (URL). After a successful run, cards show **E
 
 **Pipeline:** `Exa search → dedup → articles row → Sonnet enrich → results API hydrates from articles`
 
-The operator's run already completed enrich for each **new** URL. The results page loads `GET /api/web-discovery/queries/:id/results`, which merges `articles.summary`, `mentioned_companies`, and `body_text` onto each hit. Duplicate URLs reuse the existing article's summary.
+The operator's run already completed enrich for each **new** URL. The results page loads `GET /api/web-discovery/queries/:id/results`, which merges `articles.summary`, `mentioned_companies` (with `company_id`), and `body_text` onto each hit. Duplicate URLs reuse the existing article's summary and company rows.
 
 **Flow:**
 
@@ -232,8 +232,9 @@ Stage 2 tolerates partial engine failure. All three failing stops the run with n
 
 ```mermaid
 flowchart TD
-    START([Deep research clicked]) --> API[POST /api/research/runs]
+    START([Deep research clicked]) --> API[POST /api/research/runs + company_id]
     API --> RUNLOG[Run log · /runs/:id]
+    API --> FEED[Profiles tab · live run row]
     RUNLOG --> S1[Stage 1 · Build input]
     S1 --> S2[Stage 2 · Parallel + Exa + Diffbot]
     S2 --> S3[Stage 3 · Claude Sonnet · CompanyCardV1]
@@ -252,7 +253,7 @@ flowchart TD
 
 | Attribute | Value |
 |-----------|-------|
-| **List route** | `/companies` |
+| **List route** | `/companies` — **Profiles** tab (research feed) and **Discovered** tab (article mentions) |
 | **Profile route** | `/companies/:id` |
 | **Purpose** | Monitor in-flight research; read completed Company Cards |
 

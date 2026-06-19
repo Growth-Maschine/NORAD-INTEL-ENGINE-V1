@@ -146,8 +146,8 @@ When no executive summary exists (thin content or enrich failure), the card fall
 | **What** | A business entity NORAD tracks — name, domain, denormalised list fields |
 | **Why** | Stable identity across multiple research runs |
 | **Example** | Ultra Pouches — `takeultra.com` — Wellness, Brooklyn NY |
-| **Where in UI** | Companies in this story (results); `/companies` feed; `/companies/:id` detail |
-| **Backend** | `companies` |
+| **Where in UI** | Companies in this story (results); `/companies` **Profiles** + **Discovered** tabs; `/companies/:id` detail |
+| **Backend** | `companies` — `origin` discriminates mention vs full profile |
 
 ### 6.2 Company Profile
 
@@ -181,7 +181,7 @@ When no executive summary exists (thin content or enrich failure), the card fall
 |--|--|
 | **What** | Analyst starts full company profiling from a company name on a result card (or Companies page) |
 | **Why** | Moves from article-level intelligence to a full `CompanyCardV1` |
-| **Example** | **Deep research** on “Ultra Pouches” in Companies in this story → run log → company appears on `/companies` |
+| **Example** | **Deep research** on “Ultra Pouches” → run log → company appears on `/companies` **Profiles** tab; mention listed on **Discovered** until profile completes |
 | **Where in UI** | Query results — per-company **Deep research** button; Companies page add flow |
 | **Backend** | `POST /api/research/runs` → `runs` · `source_kind = research` |
 

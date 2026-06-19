@@ -44,7 +44,8 @@ There is **one web app** (`apps/web`) and **one API** (`apps/api`). There is no 
 | Web Discovery — query editor | `.../queries/new`, `.../queries/:queryId` | `POST/PUT /api/web-discovery/queries` |
 | Web Discovery — results | `.../queries/:queryId/results` | `GET /api/web-discovery/queries/:id/results` |
 | Research run log | `/runs/:id` | `GET /api/research/runs/:id`, SSE `/api/events/runs/:id` |
-| Companies feed | `/companies` | `GET /api/research/feed` |
+| Companies feed | `/companies` (Profiles tab) | `GET /api/research/feed` |
+| Discovered companies | `/companies` (Discovered tab) | `GET /api/research/discovered` |
 | Company profile | `/companies/:id` | `GET /api/research/companies/:id`, evidence API |
 | Settings | `/settings` | `GET/PUT /api/settings/research`, `GET /health/db` |
 
@@ -61,11 +62,12 @@ There is **one web app** (`apps/web`) and **one API** (`apps/api`). There is no 
 |-------|------|
 | `web_discovery_clusters` | Themed search scope (keywords, geography, priorities) |
 | `web_discovery_queries` | One Exa search definition per cluster |
-| `articles` | Deduplicated article store — `body_text`, Sonnet `summary`, `mentioned_companies` |
+| `articles` | Deduplicated article store — `body_text`, Sonnet `summary`, `mentioned_companies` (each with `company_id` after enrich) |
 | `runs` | One row per cluster/query run or research run |
 | `run_events` | Append-only timeline (powers SSE Activity feeds) |
 | `engine_calls` | Per-vendor request/response audit (cost, latency, JSONB payloads) |
-| `companies`, `cards`, `signals`, `sources` | Deep research output |
+| `companies` | Web Discovery mentions (`origin=web_discovery`) **and** Deep Research profiles (`origin=research`) |
+| `cards`, `signals`, `sources` | Deep research output (linked via `companies.canonical_card_id`) |
 | `app_kv` | Research engine settings (`research_config`) |
 
 **Database:** GCP Cloud SQL Postgres (`GCP_DATABASE_URL*`). Not Supabase.
@@ -109,7 +111,7 @@ There is **one web app** (`apps/web`) and **one API** (`apps/api`). There is no 
 | 1. Exa search | Search + optional contents (`content_highlights`, `content_text`, `content_summary` on query) | `engine_calls` (vendor `exa`) |
 | 2. Dedup | Normalize URL; skip if `articles.url` already exists | `ingest_status: duplicate` on hit |
 | 3. Consolidate | New hit → `articles` row with `body_text` (from Exa text, else joined highlights/snippet) | `articles` |
-| 4. Sonnet enrich | Claude Sonnet `analyze_article` tool — executive summary + `mentioned_companies` | `articles.summary`, `articles.mentioned_companies`; fields mirrored in `runs.engine_outputs` |
+| 4. Sonnet enrich | Claude Sonnet `analyze_article` tool — executive summary + `mentioned_companies` | `articles.summary`, `articles.mentioned_companies` (with `company_id` per mention); **`companies` rows** (`origin=web_discovery`, FK `source_article_id`); mirrored in `runs.engine_outputs` |
 | 5. Complete | Run `status → completed`, `engine_outputs.queries[]` holds per-query results | `runs` |
 
 **Sonnet enrich:** Fixed system prompt + tool schema in `web_discovery.py`. Query-level `system_prompt` / `output_schema` fields on `web_discovery_queries` are **saved in DB but not executed** in this pipeline.
@@ -121,8 +123,8 @@ There is **one web app** (`apps/web`) and **one API** (`apps/api`). There is no 
 | Block | Source |
 |-------|--------|
 | Executive summary | `articles.summary` (via results API hydration) |
-| Companies in this story | `articles.mentioned_companies` |
-| **Deep research** button | Per company → `POST /api/research/runs` |
+| Companies in this story | `articles.mentioned_companies` (includes `company_id`) |
+| **Deep research** button | Per company → `POST /api/research/runs` with optional `company_id` |
 | Full article (collapsible) | `articles.body_text` (cleaned for display) |
 | Source excerpts (Exa) | Shown **only** when no executive summary exists |
 
@@ -132,9 +134,9 @@ There is **one web app** (`apps/web`) and **one API** (`apps/api`). There is no 
 
 ## 5. Deep Research pipeline (summary)
 
-**Trigger:** `POST /api/research/runs` with `{ company_name, domain_hint? }`
+**Trigger:** `POST /api/research/runs` with `{ company_name, domain_hint?, company_id? }`
 
-Typical entry from Web Discovery: **Deep research** on a company named in an article.
+Typical entry from Web Discovery or **Companies → Discovered**: **Deep research** passes `company_id` when the mention row already exists.
 
 **Admission:** Max **5** in-flight `source_kind = research` runs.
 
@@ -160,7 +162,7 @@ Sidebar
 │   ├── Cluster hub    /discover-web/clusters/:clusterId
 │   ├── Query editor   .../queries/new | .../queries/:queryId
 │   └── Results        .../queries/:queryId/results
-├── Companies          /companies | /companies/:id
+├── Companies          /companies (Profiles | Discovered tabs) | /companies/:id
 ├── Signals (soon)     /signals — not wired
 ├── Feeds (soon)       /feeds — not wired
 └── Settings           /settings
@@ -182,7 +184,7 @@ Documents are maintained in order. **P1-00 (this file) is authoritative for scop
 | P1-02-Admin | [P1-02-admin.md](./P1-02-admin.md) | Operator product objects | v2.0 — revised 2026-06-19 |
 | P1-02-User | [P1-02-user.md](./P1-02-user.md) | Analyst product objects | v2.0 — revised 2026-06-19 |
 | P1-03 | [P1-03.md](./P1-03.md) | Object relationships | v2.0 — revised 2026-06-19 |
-| P1-04-Admin | [P1-04-admin.md](./P1-04-admin.md) | Required fields | v3.0 — revised 2026-06-19 |
+| P1-04-Admin | [P1-04-admin.md](./P1-04-admin.md) | Required fields | v3.1 — migration `0009` companies ↔ articles |
 | P1-05-Admin | [P1-05-admin.md](./P1-05-admin.md) | Operator UI mapping | v2.0 — revised 2026-06-19 |
 | P1-05-User | [P1-05-user.md](./P1-05-user.md) | Analyst UI mapping | v2.0 — revised 2026-06-19 |
 | P1-06 | [P1-06.md](./P1-06.md) | Backend actions | v2.0 — revised 2026-06-19 |

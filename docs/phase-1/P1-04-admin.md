@@ -4,7 +4,7 @@
 |-------|-------|
 | **Document ref** | P1-04 |
 | **Title** | Required Fields per Object |
-| **Version** | 3.0 |
+| **Version** | 3.1 |
 | **Last updated** | 2026-06-19 |
 | **Audience** | Internal developers, operators |
 | **Controlling doc** | [P1-00 Overview](./phase-1-overview.md) |
@@ -36,7 +36,7 @@ Single field-level spec for the NORAD data model. Companion to [P1-03](./P1-03.m
 
 **Cluster · Query · Run**
 
-One pipeline. **Web Discovery** UI (`/discover-web`) creates and edits Clusters and Queries. **Runs** execute on operator action (in-process — no separate worker). Each run **ingests new URLs into `articles`** and runs **Sonnet enrich** in the same pipeline. Analysts read enriched results on the **query results page** in the same app — they do not create clusters or queries. Scheduled cron and News feed are **Phase 2**.
+One pipeline. **Web Discovery** UI (`/discover-web`) creates and edits Clusters and Queries. **Runs** execute on operator action (in-process — no separate worker). Each run **ingests new URLs into `articles`**, runs **Sonnet enrich**, and **persists each mention as a `companies` row** (`origin = web_discovery`, FK `source_article_id`). Analysts read enriched results on the **query results page** in the same app — they do not create clusters or queries. Scheduled cron and News feed are **Phase 2**.
 
 | Level | Product name | Postgres table / row |
 |-------|--------------|----------------------|
@@ -221,7 +221,7 @@ Table: `runs` where `source_kind = web_discovery` · executes one or more Querie
 | article_id | UUID | No | No | Internal | FK → `articles.id` when ingested |
 | ingest_status | string | No | Yes | Results badges | `created` · `duplicate` |
 | executive_summary | text | No | Yes | Results card | Sonnet summary — hydrated from `articles.summary` |
-| mentioned_companies | JSON array | No | Yes | Companies in this story | Hydrated from `articles` |
+| mentioned_companies | JSON array | No | Yes | Companies in this story | Hydrated from `articles`; each object includes `company_id` (UUID string) after enrich |
 | enriched | boolean | No | Yes | **Analyzed** badge | `true` when Sonnet enrich succeeded |
 | source_query_id | UUID | No | No | Internal | Parent query (on Article row) |
 
@@ -244,7 +244,7 @@ Table: `articles`
 | source_query_id | UUID | No | No | Internal | FK → `web_discovery_queries.id` |
 | category_tag | string | No | No | Internal | Reserved — Phase 2 feed tagging |
 | priority_score | integer | No | No | Internal | Reserved — Phase 2 feed scoring |
-| mentioned_companies | JSON array | No | Yes | Companies in this story | Sonnet entity extraction |
+| mentioned_companies | JSON array | No | Yes | Companies in this story | Sonnet entity extraction; upserted to `companies` (`origin=web_discovery`); each element gains `company_id` |
 | source_metadata | JSON object | Yes | No | Internal | Exa hit metadata snapshot |
 | status | enum (`active`, `dismissed`, `archived`) | Yes | No | Internal | `dismiss` API exists; no UI |
 | created_at | timestamptz | Yes | No | Internal | |
@@ -281,7 +281,7 @@ Table: `runs` where `source_kind = research`
 | error | text | No | No | Activity error | |
 | engines | JSON object | Yes | No | Internal | Parallel/Exa/Diffbot config snapshot |
 | engine_outputs | JSON object | Yes | No | Research Evidence | Raw vendor payloads |
-| company_id | UUID | No | Yes | Companies list | Set on complete |
+| company_id | UUID | No | Yes | Companies list | Set at run **start** when `POST` body includes `company_id`; otherwise set on complete |
 | card_id | UUID | No | No | Internal | Set on complete |
 | idempotency_key | string(64) | No | No | Internal | |
 | started_at | timestamptz | No | Yes | Activity | |
@@ -313,6 +313,11 @@ Table: `companies`
 | status | string(32) | No | Yes | Companies list ||
 | headquarters_country | string(64) | No | Yes | Company detail | |
 | canonical_card_id | UUID | No | No | Internal | Composite FK with `id` |
+| origin | enum (`web_discovery`, `research`) | Yes | Yes | Discovered tab filter | `web_discovery` = Sonnet mention row; `research` = full profile (upgraded on Deep Research complete) |
+| source_article_id | UUID | No | No | Internal | FK → `articles.id` — set when `origin = web_discovery` |
+| discovery_role | string(64) | No | Yes | Discovered tab | Sonnet `role_in_story` (e.g. `mentioned`, `competitor`) |
+| discovery_context | text | No | Yes | Discovered tab | Sonnet one-line context |
+| normalized_name | string(255) | No | No | Internal | Lowercased name — part of unique `(source_article_id, normalized_name)` |
 | is_watchlisted | boolean | No | No | Internal | **Phase 2** — not on `companies` model yet |
 | created_at | timestamptz | Yes | Yes | Company metadata | |
 | updated_at | timestamptz | Yes | No | Internal | |
@@ -462,7 +467,7 @@ Not a table. LLM output columns:
 | Parent | Field | Type | Required | UI |
 | -------- | ------- | ------ | ---------- | ----- |
 | Article | summary | text | No | Executive summary on results card |
-| Article | mentioned_companies | JSON array | No | Companies in this story |
+| Article | mentioned_companies | JSON array | No | Companies in this story — each item may include `company_id` |
 | Company Card | card (synthesis) | JSONB | Yes | Company detail |
 | `engine_calls` | (audit row) | — | — | Research Evidence |
 
@@ -472,12 +477,13 @@ Not a table. LLM output columns:
 
 ### 8.1 Deep research trigger
 
-**No table.** User action from a Web Discovery result card (company in `mentioned_companies`).
+**No table.** User action from a Web Discovery result card or **Companies → Discovered** tab.
 
 | Concept | Persisted as | Notes |
 |---------|--------------|-------|
 | Deep research click | New `runs` row `source_kind=research` | `POST /api/research/runs` |
-| Company name / domain hint | `runs.query` + engines metadata | |
+| Company name / domain hint | `runs.query` + `runs.engines` | |
+| Existing discovery row | Optional `company_id` in POST body | Pins run to `companies` row; `runs.company_id` set at enqueue |
 
 ### 8.2 Pending Review Item *(Phase 2 — view, not a table)*
 
@@ -610,6 +616,8 @@ erDiagram
         string company_name
         string domain UK
         uuid canonical_card_id "composite FK"
+        string origin "web_discovery | research"
+        uuid source_article_id FK
         string industry
     }
 
@@ -673,6 +681,7 @@ erDiagram
     web_discovery_queries }o--o{ runs : executes
     web_discovery_queries ||--o{ articles : "source_query_id SET NULL"
     runs ||--o{ articles : "query_run_id SET NULL"
+    articles ||--o{ companies : "source_article_id SET NULL"
 
     runs ||--o{ run_events : logs
     runs ||--o{ engine_calls : audits
@@ -767,6 +776,11 @@ erDiagram
         string company_name
         string domain UK "nullable apex domain"
         uuid canonical_card_id "composite FK part 1"
+        string origin "web_discovery | research"
+        uuid source_article_id FK "nullable"
+        string discovery_role "nullable"
+        text discovery_context "nullable"
+        string normalized_name "nullable"
         string industry
         string category
         timestamptz created_at
@@ -842,6 +856,7 @@ erDiagram
     runs }o--o| cards : "card_id SET NULL"
     cards }o--o| runs : "run_id SET NULL"
 
+    articles ||--o{ companies : "source_article_id SET NULL"
     companies ||--o{ cards : "company_id CASCADE"
     companies |o--o| cards : "canonical composite FK"
     cards ||--o{ signals : "card_id company_id composite"
@@ -858,8 +873,9 @@ erDiagram
 | `articles` | `source_query_id` | `web_discovery_queries.id` | **SET NULL** | N:1 | Which query definition |
 | `run_events` | `run_id` | `runs.id` | **CASCADE** | N:1 | Events die with run |
 | `engine_calls` | `run_id` | `runs.id` | **SET NULL** | N:1 | Audit row kept if run deleted |
-| `runs` | `company_id` | `companies.id` | **SET NULL** | N:1 | Filled when `source_kind = research` completes |
+| `runs` | `company_id` | `companies.id` | **SET NULL** | N:1 | Set at run **start** when body includes `company_id`; otherwise on research complete |
 | `runs` | `card_id` | `cards.id` | **SET NULL** | N:1 | Filled when research completes |
+| `companies` | `source_article_id` | `articles.id` | **SET NULL** | N:1 | Web Discovery mention — one row per `(article, normalized_name)` |
 | `cards` | `company_id` | `companies.id` | **CASCADE** | N:1 | Delete company → deletes all its cards |
 | `cards` | `run_id` | `runs.id` | **SET NULL** | N:1 | Card kept if run deleted |
 | `signals` | `(card_id, company_id)` | `cards(id, company_id)` | **CASCADE** | N:1 | **Composite FK** — see §9.6 |
@@ -873,7 +889,8 @@ erDiagram
 | Link | How it works |
 |------|----------------|
 | `web_discovery_queries` → `runs` | `runs.engines` JSON holds `cluster_id` + `query_ids[]`; `engine_outputs` holds per-query Exa hits |
-| `articles` → Deep Research | User action — **not** a FK; `POST /api/research/runs` uses company name from `mentioned_companies` |
+| `articles.mentioned_companies[]` → `companies` | **Dual write:** JSON array for UI hydration **and** relational rows via `persist_discovery_companies()` after Sonnet enrich |
+| `articles` → Deep Research | User action — `POST /api/research/runs` with optional `company_id` from mention row |
 | `app_kv` → `runs` | Settings copied into `runs.engines` at research start — no FK |
 
 #### 9.3.3 Unique constraints
@@ -883,6 +900,7 @@ erDiagram
 | `web_discovery_clusters` | `slug` unique | `slug` |
 | `articles` | one row per URL | `url` |
 | `companies` | dedupe by domain | `domain` (nullable) |
+| `companies` | one mention per article + name | **`UNIQUE (source_article_id, normalized_name)`** partial — where both NOT NULL (`0009`) |
 | `runs` | idempotency | `idempotency_key` (nullable) |
 | `cards` | composite uniqueness | **`UNIQUE (id, company_id)`** — enables composite FKs on signals/sources |
 | `app_kv` | singleton keys | `key` (PK) |
@@ -891,8 +909,8 @@ erDiagram
 
 | `source_kind` | Typical `company_id` / `card_id` | Main outputs |
 |---------------|----------------------------------|--------------|
-| `web_discovery` | NULL / NULL | `engine_outputs` JSON + new `articles` rows |
-| `research` | Set on complete | `companies`, `cards`, `signals`, `sources` |
+| `web_discovery` | NULL / NULL on run row | `engine_outputs` JSON + `articles` ingest + enrich + **`companies` rows** (`origin=web_discovery`) |
+| `research` | `company_id` at start if passed; `card_id` on complete | Upgrades existing row or creates `companies`; writes `cards`, `signals`, `sources` |
 | `user_query` | Same as `research` | Legacy discriminator — same pipeline |
 
 #### 9.3.5 Tables in production (checklist)
@@ -903,7 +921,7 @@ erDiagram
 | 2 | `web_discovery_queries` | Operator UI | `POST/PUT /api/web-discovery/queries` |
 | 3 | `runs` | Both pipelines | Run / Deep research APIs + `web_discovery.py` / `research.py` |
 | 4 | `articles` | Web Discovery | Exa ingest + Sonnet enrich in `web_discovery.py` |
-| 5 | `companies` | Deep Research | Domain resolve in `research.py` |
+| 5 | `companies` | Web Discovery + Deep Research | Sonnet enrich → `discovery_companies.py`; domain resolve + upgrade in `research.py` |
 | 6 | `cards` | Deep Research | Sonnet synthesis → `CompanyCardV1` JSON |
 | 7 | `signals` | Deep Research | Extracted from card synthesis |
 | 8 | `sources` | Deep Research | Citations from engine evidence |
@@ -915,11 +933,13 @@ erDiagram
 
 **Retired (dropped in `0007_drop_today_legacy.sql`):** `trend_articles`, `discovery_clusters`.
 
+**Schema migration `0009_companies_web_discovery_origin.sql`:** adds `origin`, `source_article_id`, discovery columns, and `uq_companies_article_normalized_name`. Apply with **`norad_migrate`** user (not `norad_app`).
+
 #### 9.3.6 Diagram notes
 
 1. **Composite FKs** on `companies.canonical_card_id`, `signals`, and `sources` prevent a card from one company being attached to another. Full detail: §9.6.
 2. **Search Results** are **not rows** — they live in `runs.engine_outputs[].results[]`. The results API **hydrates** enrich fields from `articles` when `article_id` is set.
-3. **`mentioned_companies`** on `articles` is JSONB array — not FK to `companies` until user runs Deep Research.
+3. **`mentioned_companies`** is JSONB for the results UI **and** mirrored to **`companies` rows** with FK `source_article_id`. Each JSON object includes `company_id` after enrich. Deep Research can pass that id to upgrade the same row (`origin` → `research` on complete).
 4. **`cards.card`** is the full `CompanyCardV1` document; denormalized `score_*` columns exist for list sort without parsing JSON.
 
 ### 9.4 Diagram by product area
@@ -946,12 +966,13 @@ flowchart TB
     SLICE --> SR
     SR --> ITEM
 
-    ITEM -.->|Deep research| RUNS2[(runs source_kind=research)]
+    ITEM -.->|Deep research + company_id| RUNS2[(runs source_kind=research)]
     RUNS -->|ingest + enrich| ART[articles]
-    ART -.->|hydrate| ITEM
+    ART -->|persist mentions| CO[companies origin=web_discovery]
+    ART -.->|hydrate + company_id| ITEM
 ```
 
-Search Results are **not rows** — JSON inside `engine_outputs`. **Articles** are created during the same Web Discovery run (dedup + Sonnet enrich). Results API hydrates Article fields onto each hit.
+Search Results are **not rows** — JSON inside `engine_outputs`. **Articles** are created during the same Web Discovery run (dedup + Sonnet enrich). **`companies` rows** (`origin=web_discovery`) are upserted per mention. Results API hydrates Article fields (including `company_id` on each mention) onto each hit.
 
 #### Deep Research (shared)
 
@@ -965,7 +986,7 @@ flowchart TB
     EV[run_events]
     EC[engine_calls]
 
-    RUNS -->|company_id| CO
+    RUNS -->|company_id at start| CO
     RUNS -->|run_id| CARD
     CARD -->|company_id CASCADE| CO
     CO -->|canonical_card_id| CARD
@@ -984,14 +1005,18 @@ flowchart TB
 flowchart TB
     RUNS[(Run · web_discovery)]
     ART[articles]
+    CO[companies · web_discovery]
     CARD[Result card · UI view]
 
     RUNS -->|ingest + enrich| ART
+    ART -->|persist_discovery_companies| CO
     ART -->|hydrate| CARD
-    CARD -->|Deep research| DRR[(runs · research)]
+    CO -.->|company_id on mention| CARD
+    CARD -->|Deep research + company_id| DRR[(runs · research)]
+    DRR -->|upgrade same row| CO2[companies · research + card]
 ```
 
-Users read **result cards** on the query results route — not a separate News feed. `GET /api/web-discovery/articles` exists for article listing; primary analyst surface is query results.
+Users read **result cards** on the query results route — not a separate News feed. **`GET /api/research/discovered`** lists Web Discovery mention rows for **Companies → Discovered**. `GET /api/web-discovery/articles` exists for article listing; primary analyst surface is query results.
 
 #### Analyst News feed *(Phase 2 — not built)*
 
@@ -1061,16 +1086,16 @@ flowchart TD
     WD --> |engines.cluster_id| CL[Cluster]
     WD --> |engines.query_ids| Q[Query]
     WD --> OUT1[engine_outputs → Search Results]
-    WD --> OUT2[ingest → articles]
+    WD --> OUT2[ingest → articles → companies web_discovery]
 
-    RS --> OUT3[companies + cards + signals + sources]
+    RS --> OUT3[upgrade companies + cards + signals + sources]
     UQ --> OUT3
 ```
 
 | `source_kind` | Trigger | Output |
 |---------------|---------|--------|
-| `web_discovery` | Run Query / Run All | Search Results JSON · `articles` ingest + enrich |
-| `research` | Deep research / API | Company + Card |
+| `web_discovery` | Run Query / Run All | Search Results JSON · `articles` ingest + enrich · **`companies` mention rows** |
+| `research` | Deep research / API | Upgrade or create Company + Card (`origin → research`) |
 | `user_query` | Same as `research` | Company + Card |
 
 ### 9.6 Composite foreign keys (detail)
@@ -1127,7 +1152,7 @@ erDiagram
 | `runs.engine_outputs` | Per-query Exa results, Search Result objects | Optional `search_results` |
 | `runs.engines` | Run config + cluster/query provenance | Optional dedicated FK columns |
 | `cards.card` | Full `CompanyCardV1` — see `apps/api/app/schemas/` | Stay JSONB |
-| `articles.mentioned_companies` | Companies in story | Stay JSON or junction |
+| `articles.mentioned_companies` | Companies in story + `company_id` per item | JSON kept for hydration; relational rows in `companies` |
 | `app_kv.value` | `research_config` | Stay KV |
 
 ### 9.8 End-to-end data flow
@@ -1140,7 +1165,8 @@ flowchart LR
         A2[Run Exa]
         A3[Result cards]
         A4[Deep research]
-        B1[Companies feed]
+        B1[Companies Profiles tab]
+        B2[Companies Discovered tab]
     end
 
     subgraph DB["Postgres"]
@@ -1153,11 +1179,14 @@ flowchart LR
 
     A1 --> A2 --> R
     R --> ART
+    ART --> C
     ART --> A3
     A3 --> A4 --> R
     A4 --> C
     R --> K
     K --> B1
+    C --> B2
+    C --> B1
 ```
 
 ---
@@ -1177,7 +1206,7 @@ Analysts use the **same app and Postgres schema**. They read enriched Web Discov
 |--------|---------------------------|
 | Cluster, Query, Run | Not configured in analyst journey — operator routes |
 | Article, result card | Read on query results page |
-| Company, Company Profile, Company Signal | Read on `/companies` |
+| Company, Company Profile, Company Signal | Read on `/companies` — **Profiles** tab (research feed) and **Discovered** tab (Web Discovery mentions) |
 | Pending Review, Watchlist, News Signal | **Phase 2** — see §8.2, §3.6 |
 
 ---
@@ -1191,6 +1220,7 @@ Analysts use the **same app and Postgres schema**. They read enriched Web Discov
 | Part I — Article enrich fields (§3.4–3.5) |
 | Part I — News Signal marked Phase 2 (§3.6) |
 | Part II — database schema diagrams (§9) |
+| Migration `0009` — companies ↔ articles FK documented (§9.3) |
 | Single-app analyst consumption (§10) |
 | CompanyCardV1 JSON deferred to `apps/api/app/schemas/` |
 | `organization_id` omitted per MVP decision |
