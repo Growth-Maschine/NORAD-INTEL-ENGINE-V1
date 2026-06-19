@@ -506,15 +506,18 @@ Visual layer on top of Part I field tables and [P1-03](./P1-03.md) (relationship
 
 | Symbol / label | Meaning |
 |----------------|---------|
-| **Solid line** | FK exists or is defined in schema |
-| **Dotted line** | Logical link — JSON embed, view, or provenance |
-| 🟢 | Table exists in repo |
-| 🔵 | not migrated yet |
+| **Solid line** | FK exists in Postgres |
+| **Composite FK** | Two columns together reference parent — see §9.3.2 and §9.6 |
+| **Logical link (no FK row)** | JSON embed or user action — see §9.3.2 “No FK” table |
+| 🟢 | Table exists in live DB (§9.3) |
+| 🔵 | Planned — in §9.2 only, not migrated |
 | ⬜ | View or derived — not a table |
 
 **MVP:** No `organizations` or `organization_id` until multi-tenant. **Single `runs` table** — `source_kind` discriminates Run vs deep research.
 
-### 9.2 Master schema — all tables
+> §9.2 below includes **planned** tables (`article_signals`, `monitoring_rules`, etc.) for product reference. **§9.3 is the live schema** — 11 tables on GCP Cloud SQL as of 2026-06-19. Field-level detail: Part I §2–§8.
+
+### 9.2 Master schema — all tables (reference + planned)
 
 ```mermaid
 erDiagram
@@ -558,10 +561,10 @@ erDiagram
         text url UK
         string title
         text summary
-        timestamptz published_at
         uuid cluster_id FK
         uuid query_run_id FK
-        int priority_score
+        uuid source_query_id FK
+        jsonb mentioned_companies
         string status
     }
 
@@ -606,8 +609,7 @@ erDiagram
         uuid id PK
         string company_name
         string domain UK
-        uuid canonical_card_id FK
-        boolean is_watchlisted
+        uuid canonical_card_id "composite FK"
         string industry
     }
 
@@ -669,9 +671,8 @@ erDiagram
     web_discovery_clusters ||--o{ web_discovery_queries : contains
 
     web_discovery_queries }o--o{ runs : executes
-    web_discovery_clusters ||--o{ articles : ingests
-
-    runs ||--o{ articles : ingests
+    web_discovery_queries ||--o{ articles : "source_query_id SET NULL"
+    runs ||--o{ articles : "query_run_id SET NULL"
 
     runs ||--o{ run_events : logs
     runs ||--o{ engine_calls : audits
@@ -693,45 +694,233 @@ erDiagram
     users ||--o{ watchlist_entries : promoted_by
 ```
 
-> `companies.canonical_card_id` and `signals` / `sources` use **composite FKs** with `(card_id, company_id)` — simplified above. See §9.6.
+> §9.2 includes **planned** tables not in live DB. For exact FKs, ON DELETE rules, and all 11 production tables, use **§9.3**.
 
-### 9.3 Current schema
+### 9.3 Current schema (live — 11 tables)
+
+**Source of truth:** `apps/api/app/models/` · verified on GCP Cloud SQL Postgres.
+
+#### 9.3.1 Entity-relationship diagram
 
 ```mermaid
 erDiagram
-    web_discovery_clusters ||--o{ web_discovery_queries : cluster_id
+    web_discovery_clusters {
+        uuid id PK
+        string slug UK "unique"
+        string name
+        string priority
+        boolean is_active
+        jsonb include_keywords
+        timestamptz last_run_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
 
-    web_discovery_queries }o..o{ runs : "engine_outputs JSON only"
+    web_discovery_queries {
+        uuid id PK
+        uuid cluster_id FK "NOT NULL"
+        string label
+        text search_query
+        string search_type
+        int num_results
+        boolean is_active
+        boolean content_text
+        boolean content_highlights
+        timestamptz created_at
+        timestamptz updated_at
+    }
 
-    runs ||--o{ run_events : run_id
-    runs ||--o{ engine_calls : run_id
-    runs }o--o| companies : company_id
-    runs }o--o| cards : card_id
+    runs {
+        uuid id PK
+        string source_kind "web_discovery | research | user_query"
+        text query
+        string status
+        int progress_pct
+        jsonb engines "config snapshot"
+        jsonb engine_outputs "Search Results JSON"
+        uuid company_id FK "nullable"
+        uuid card_id FK "nullable"
+        string idempotency_key UK "nullable"
+        timestamptz started_at
+        timestamptz completed_at
+        timestamptz created_at
+    }
 
-    companies ||--o{ cards : company_id
-    companies |o--o| cards : "canonical_card_id composite"
+    articles {
+        uuid id PK
+        text url UK "unique dedupe key"
+        string title
+        text summary "Sonnet executive summary"
+        text body_text
+        jsonb mentioned_companies "array"
+        jsonb source_metadata "object"
+        string status "active | dismissed | archived"
+        uuid cluster_id FK "nullable"
+        uuid query_run_id FK "nullable"
+        uuid source_query_id FK "nullable"
+        timestamptz ingested_at
+        timestamptz created_at
+    }
 
-    cards ||--o{ signals : "card_id plus company_id"
-    cards ||--o{ sources : "card_id plus company_id"
+    companies {
+        uuid id PK
+        string company_name
+        string domain UK "nullable apex domain"
+        uuid canonical_card_id "composite FK part 1"
+        string industry
+        string category
+        timestamptz created_at
+    }
+
+    cards {
+        uuid id PK
+        uuid company_id FK "NOT NULL"
+        uuid run_id FK "nullable"
+        jsonb card "CompanyCardV1"
+        string review_status "draft | accepted | rejected | archived"
+        int score_overall "0-100 denorm"
+        timestamptz created_at
+    }
+
+    signals {
+        uuid id PK
+        uuid company_id FK "NOT NULL"
+        uuid card_id FK "composite with company_id"
+        string type
+        text headline
+        int weight "1-10"
+        date signal_date
+        jsonb source_refs
+    }
+
+    sources {
+        uuid id PK
+        uuid company_id FK "NOT NULL"
+        uuid card_id FK "composite with company_id"
+        int local_id
+        text url
+        string trust_tier
+    }
+
+    run_events {
+        uuid id PK
+        uuid run_id FK "NOT NULL"
+        string kind
+        text message
+        string level
+        jsonb meta
+        timestamptz created_at
+    }
+
+    engine_calls {
+        uuid id PK
+        uuid run_id FK "nullable"
+        string vendor "exa | anthropic | parallel | diffbot"
+        string operation
+        float cost_usd
+        float latency_ms
+        string status "ok | error | timeout"
+        jsonb request_payload
+        jsonb response_payload
+    }
 
     app_kv {
         string key PK
         jsonb value
+        timestamptz updated_at
     }
+
+    web_discovery_clusters ||--o{ web_discovery_queries : "cluster_id CASCADE"
+    web_discovery_clusters ||--o{ articles : "cluster_id SET NULL"
+    web_discovery_queries ||--o{ articles : "source_query_id SET NULL"
+
+    runs ||--o{ articles : "query_run_id SET NULL"
+    runs ||--o{ run_events : "run_id CASCADE"
+    runs ||--o{ engine_calls : "run_id SET NULL"
+
+    runs }o--o| companies : "company_id SET NULL"
+    runs }o--o| cards : "card_id SET NULL"
+    cards }o--o| runs : "run_id SET NULL"
+
+    companies ||--o{ cards : "company_id CASCADE"
+    companies |o--o| cards : "canonical composite FK"
+    cards ||--o{ signals : "card_id company_id composite"
+    cards ||--o{ sources : "card_id company_id composite"
 ```
 
-| Table |
-| ------- |
-| `web_discovery_clusters` |
-| `web_discovery_queries` |
-| `runs` |
-| `companies` |
-| `cards` |
-| `signals` |
-| `sources` |
-| `run_events` |
-| `engine_calls` |
-| `app_kv` |
+#### 9.3.2 Foreign-key reference (exact behaviour)
+
+| Child table | Column(s) | Parent | ON DELETE | Cardinality | Notes |
+|-------------|-----------|--------|-----------|-------------|-------|
+| `web_discovery_queries` | `cluster_id` | `web_discovery_clusters.id` | **CASCADE** | N:1 | Delete cluster → deletes its queries |
+| `articles` | `cluster_id` | `web_discovery_clusters.id` | **SET NULL** | N:1 | Article survives cluster delete |
+| `articles` | `query_run_id` | `runs.id` | **SET NULL** | N:1 | Provenance — which run ingested URL |
+| `articles` | `source_query_id` | `web_discovery_queries.id` | **SET NULL** | N:1 | Which query definition |
+| `run_events` | `run_id` | `runs.id` | **CASCADE** | N:1 | Events die with run |
+| `engine_calls` | `run_id` | `runs.id` | **SET NULL** | N:1 | Audit row kept if run deleted |
+| `runs` | `company_id` | `companies.id` | **SET NULL** | N:1 | Filled when `source_kind = research` completes |
+| `runs` | `card_id` | `cards.id` | **SET NULL** | N:1 | Filled when research completes |
+| `cards` | `company_id` | `companies.id` | **CASCADE** | N:1 | Delete company → deletes all its cards |
+| `cards` | `run_id` | `runs.id` | **SET NULL** | N:1 | Card kept if run deleted |
+| `signals` | `(card_id, company_id)` | `cards(id, company_id)` | **CASCADE** | N:1 | **Composite FK** — see §9.6 |
+| `signals` | `company_id` | `companies.id` | **CASCADE** | N:1 | Single-column FK for cascade |
+| `sources` | `(card_id, company_id)` | `cards(id, company_id)` | **CASCADE** | N:1 | **Composite FK** — see §9.6 |
+| `sources` | `company_id` | `companies.id` | **CASCADE** | N:1 | Single-column FK for cascade |
+| `companies` | `(canonical_card_id, id)` | `cards(id, company_id)` | **SET NULL** | 1:1 optional | **Composite FK** — accepted profile pointer |
+
+**No FK row (logical only):**
+
+| Link | How it works |
+|------|----------------|
+| `web_discovery_queries` → `runs` | `runs.engines` JSON holds `cluster_id` + `query_ids[]`; `engine_outputs` holds per-query Exa hits |
+| `articles` → Deep Research | User action — **not** a FK; `POST /api/research/runs` uses company name from `mentioned_companies` |
+| `app_kv` → `runs` | Settings copied into `runs.engines` at research start — no FK |
+
+#### 9.3.3 Unique constraints
+
+| Table | Constraint | Columns |
+|-------|------------|---------|
+| `web_discovery_clusters` | `slug` unique | `slug` |
+| `articles` | one row per URL | `url` |
+| `companies` | dedupe by domain | `domain` (nullable) |
+| `runs` | idempotency | `idempotency_key` (nullable) |
+| `cards` | composite uniqueness | **`UNIQUE (id, company_id)`** — enables composite FKs on signals/sources |
+| `app_kv` | singleton keys | `key` (PK) |
+
+#### 9.3.4 `runs` polymorphism (same table, two pipelines)
+
+| `source_kind` | Typical `company_id` / `card_id` | Main outputs |
+|---------------|----------------------------------|--------------|
+| `web_discovery` | NULL / NULL | `engine_outputs` JSON + new `articles` rows |
+| `research` | Set on complete | `companies`, `cards`, `signals`, `sources` |
+| `user_query` | Same as `research` | Legacy discriminator — same pipeline |
+
+#### 9.3.5 Tables in production (checklist)
+
+| # | Table | Rows (example) | Written by |
+|---|-------|----------------|------------|
+| 1 | `web_discovery_clusters` | Operator UI | `POST/PUT /api/web-discovery/clusters` |
+| 2 | `web_discovery_queries` | Operator UI | `POST/PUT /api/web-discovery/queries` |
+| 3 | `runs` | Both pipelines | Run / Deep research APIs + `web_discovery.py` / `research.py` |
+| 4 | `articles` | Web Discovery | Exa ingest + Sonnet enrich in `web_discovery.py` |
+| 5 | `companies` | Deep Research | Domain resolve in `research.py` |
+| 6 | `cards` | Deep Research | Sonnet synthesis → `CompanyCardV1` JSON |
+| 7 | `signals` | Deep Research | Extracted from card synthesis |
+| 8 | `sources` | Deep Research | Citations from engine evidence |
+| 9 | `run_events` | Both pipelines | `emit()` → SSE Activity feed |
+| 10 | `engine_calls` | Both pipelines | Every Exa / Anthropic / Parallel / Diffbot call |
+| 11 | `app_kv` | Settings | `PUT /api/settings/research` (`key = research_config`) |
+
+**Not in live DB (planned — see §9.2):** `article_signals`, `monitoring_rules`, `organizations`, `users`, `watchlist_entries`.
+
+**Retired (dropped in `0007_drop_today_legacy.sql`):** `trend_articles`, `discovery_clusters`.
+
+#### 9.3.6 Diagram notes
+
+1. **Composite FKs** on `companies.canonical_card_id`, `signals`, and `sources` prevent a card from one company being attached to another. Full detail: §9.6.
+2. **Search Results** are **not rows** — they live in `runs.engine_outputs[].results[]`. The results API **hydrates** enrich fields from `articles` when `article_id` is set.
+3. **`mentioned_companies`** on `articles` is JSONB array — not FK to `companies` until user runs Deep Research.
+4. **`cards.card`** is the full `CompanyCardV1` document; denormalized `score_*` columns exist for list sort without parsing JSON.
 
 ### 9.4 Diagram by product area
 
@@ -884,38 +1073,52 @@ flowchart TD
 | `research` | Deep research / API | Company + Card |
 | `user_query` | Same as `research` | Company + Card |
 
-### 9.6 Composite foreign keys
+### 9.6 Composite foreign keys (detail)
+
+`cards` has **`UNIQUE (id, company_id)`**. Child tables reference **both** columns so a signal/source cannot point at another company's card.
 
 ```mermaid
 erDiagram
     companies {
         uuid id PK
-        uuid canonical_card_id
+        uuid canonical_card_id "nullable"
     }
     cards {
         uuid id PK
-        uuid company_id FK
+        uuid company_id FK "NOT NULL"
+        uuid run_id FK
+        jsonb card
+        string review_status
     }
     signals {
-        uuid card_id
-        uuid company_id
+        uuid id PK
+        uuid card_id "composite"
+        uuid company_id "composite"
+        string type
+        text headline
     }
     sources {
-        uuid card_id
-        uuid company_id
+        uuid id PK
+        uuid card_id "composite"
+        uuid company_id "composite"
+        int local_id
+        text url
     }
 
-    cards ||--|| companies : company_id
-    companies |o--|| cards : "canonical_card_id composite"
-    cards ||--o{ signals : "card_id plus company_id composite"
-    cards ||--o{ sources : "card_id plus company_id composite"
+    companies ||--o{ cards : "company_id ON DELETE CASCADE"
+    companies |o--o| cards : "FK canonical_card_id id to cards id company_id SET NULL"
+    cards ||--o{ signals : "FK card_id company_id to cards id company_id CASCADE"
+    cards ||--o{ sources : "FK card_id company_id to cards id company_id CASCADE"
 ```
 
-| Constraint | Prevents |
-|------------|----------|
-| `cards(company_id)` → `companies(id)` | Orphan cards |
-| `(canonical_card_id, id)` → `cards(id, company_id)` | Canonical card from another company |
-| `(card_id, company_id)` on signals/sources | Cross-company drift |
+| Constraint | SQL shape | Prevents |
+|------------|-----------|----------|
+| Card belongs to company | `cards.company_id` → `companies.id` | Orphan cards |
+| Canonical card integrity | `(companies.canonical_card_id, companies.id)` → `cards(id, company_id)` | Company pointing at another company's card |
+| Signal integrity | `(signals.card_id, signals.company_id)` → `cards(id, company_id)` | Signal on wrong company's card |
+| Source integrity | `(sources.card_id, sources.company_id)` → `cards(id, company_id)` | Citation on wrong company's card |
+
+**ORM:** `apps/api/app/models/card.py` (`UniqueConstraint id, company_id`) · `company.py` (`fk_companies_canonical_card`) · `signal.py` / `source.py` (`ForeignKeyConstraint` on both columns).
 
 ### 9.7 JSON embeds (not separate tables)
 
