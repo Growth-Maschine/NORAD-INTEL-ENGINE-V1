@@ -1,4 +1,4 @@
-"""Async Redis client (used for cache, pubsub, and the arq job queue)."""
+"""Async Redis client (optional — /health/db connectivity probe)."""
 from __future__ import annotations
 
 from redis.asyncio import Redis, from_url

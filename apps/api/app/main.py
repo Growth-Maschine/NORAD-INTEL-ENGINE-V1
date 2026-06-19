@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import get_settings
 from app.core.db import get_session_factory
 from app.core.orphan_sweeper import sweep_orphan_runs
-from app.routers import brands, discovery, engines, events, health, research, schemas, web_discovery
+from app.routers import engines, events, health, research, schemas, web_discovery
 from app.routers import settings as settings_router
 
 logger = logging.getLogger(__name__)
@@ -60,9 +60,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(engines.router)
     app.include_router(events.router)
-    app.include_router(brands.router)
     app.include_router(schemas.router)
-    app.include_router(discovery.router)
     app.include_router(web_discovery.router)
     app.include_router(research.router)
     app.include_router(settings_router.router)
@@ -91,7 +89,7 @@ def create_app() -> FastAPI:
 
         # SPA history fallback. Anything that isn't an API/health/docs path
         # and isn't a real file in dist gets the SPA shell so client-side
-        # routing (/companies, /settings, /today/run/...) works on refresh.
+        # routing (/companies, /settings, /discover-web/...) works on refresh.
         @app.get("/{full_path:path}", include_in_schema=False)
         def _spa_catch_all(full_path: str, request: Request):
             # Never intercept API surface or auto-docs

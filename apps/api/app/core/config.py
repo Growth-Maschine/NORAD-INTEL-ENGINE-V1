@@ -56,33 +56,16 @@ class Settings(BaseSettings):
     diffbot_api_key: str = Field(default="")
     anthropic_api_key: str = Field(default="")
 
-    # ── supabase
-    supabase_url: str = Field(default="")
-    supabase_project_ref: str = Field(default="")
-    supabase_publishable_key: str = Field(default="")
-    supabase_secret_key: str = Field(default="")
-    supabase_jwt_secret: str = Field(default="")
+    # ── postgres (GCP Cloud SQL)
+    #   GCP_DATABASE_URL        : asyncpg runtime URL for the API
+    #   GCP_DATABASE_URL_POOL   : sync psql URL for DDL scripts
+    #   GCP_DATABASE_URL_DIRECT : same as POOL for Cloud SQL (Auth Proxy locally)
+    gcp_database_url: str = Field(default="")
+    gcp_database_url_pool: str = Field(default="")
+    gcp_database_url_direct: str = Field(default="")
 
-    # ── postgres (supabase)
-    # Prefixed `supabase_` so they don't collide with Replit's auto-injected
-    # DATABASE_URL (which points at the built-in Helium dev DB).
-    #
-    # Three URLs, used by different code paths:
-    #   _url        : transaction pooler (port 6543, IPv4)  → app runtime
-    #   _url_pool   : SESSION  pooler   (port 5432, IPv4)  → ad-hoc DDL on Replit
-    #                 (Supabase Dashboard → Connect → "Session pooler")
-    #   _url_direct : direct connection (port 5432, IPv6)  → ad-hoc DDL on local
-    #                 dev machines that have IPv6 routing
-    # Schema is managed by running SQL directly against Supabase (no Alembic).
-    # For DDL from Replit shells use `_url_pool`; from local dev use `_url_direct`.
-    supabase_database_url: str = Field(default="")
-    supabase_database_url_pool: str = Field(default="")
-    supabase_database_url_direct: str = Field(default="")
-
-    # ── redis (upstash or self-hosted)
+    # ── redis (optional — health/db connectivity probe)
     redis_url: str = Field(default="")
-    upstash_redis_rest_url: str = Field(default="")
-    upstash_redis_rest_token: str = Field(default="")
 
     @property
     def database_url_async(self) -> str:
@@ -91,7 +74,7 @@ class Settings(BaseSettings):
         asyncpg requires `postgresql+asyncpg://` for SQLAlchemy's async engine.
         Accepts `postgresql://` or `postgres://` as input.
         """
-        url = self.supabase_database_url
+        url = self.gcp_database_url
         if not url:
             return ""
         if url.startswith("postgresql+asyncpg://"):

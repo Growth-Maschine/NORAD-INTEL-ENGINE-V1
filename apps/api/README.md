@@ -12,23 +12,34 @@ python scripts/dev.py
 
 Uses port **8000** when free, otherwise the next available port (prints the URL).
 
-## Endpoints
+Research and web-discovery runs execute in-process (`asyncio.create_task`) — no
+separate worker process.
 
-- `GET /`         — root info
-- `GET /health`   — liveness probe
-- `GET /ready`    — readiness probe
-- `GET /brands`   — placeholder
-- `GET /docs`     — interactive OpenAPI docs
-- `GET /redoc`    — alternative docs
+## Key endpoints
+
+| Path | Purpose |
+|------|---------|
+| `GET /health`, `/ready`, `/health/db` | Liveness + DB/Redis probes |
+| `GET /api/research/*` | Company research pipeline |
+| `GET /api/web-discovery/*` | Exa search → articles → Sonnet enrich |
+| `GET /api/events/runs/:id` | SSE live feed for a run |
+| `GET /api/settings/*` | Pipeline config (`app_kv`) |
+| `GET /docs` | OpenAPI |
 
 ## Layout
 
 ```
 app/
-├── main.py          # FastAPI app factory + middleware + router mounting
-├── core/
-│   └── config.py    # Settings (env-driven, pydantic-settings)
-└── routers/
-    ├── health.py    # /health, /ready
-    └── brands.py    # /brands (placeholder)
+├── main.py              # FastAPI app + router mounting + SPA fallback
+├── core/                # config, db, redis, pipeline log, orphan sweeper
+├── engines/             # Exa, Claude, Parallel, Diffbot clients
+├── models/              # SQLAlchemy ORM (source of truth)
+├── routers/             # HTTP surface
+├── schemas/             # CompanyCardV1 contract
+├── services/            # research, web_discovery, run_events, settings
+└── utils/
+sql/                     # Versioned DDL — apply with psql
+scripts/dev.py           # Local uvicorn launcher
 ```
+
+DDL workflow: see `docs/backend-pipeline.md` and `apps/api/sql/`.

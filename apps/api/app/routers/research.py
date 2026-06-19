@@ -8,9 +8,7 @@ Endpoints under `/api/research/*`:
     GET  /companies                — list known companies (by latest card)
     GET  /companies/:id            — one company + its canonical card + lists
 
-Mirrors discovery.py's contracts: same admin gate, same in-flight admission cap,
-same in-process `asyncio.create_task` fire-and-forget (an arq worker will swap
-this out later without changing the API surface).
+Runs in-process via `asyncio.create_task` — no separate worker process.
 """
 from __future__ import annotations
 
@@ -28,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import get_session
-from app.models import Card, Company, Run, Signal, Source, TrendArticle
+from app.models import Card, Company, Run, Signal, Source
 from app.services.company_evidence import get_company_evidence
 from app.services.research import ResearchParams, execute_research
 
@@ -50,7 +48,6 @@ def _require_admin_in_prod(x_admin_token: str | None) -> None:
 class ResearchRunRequest(BaseModel):
     company_name: str = Field(..., min_length=1, max_length=200)
     domain_hint: str | None = Field(None, max_length=255)
-    trend_article_id: uuid.UUID | None = None
 
 
 class ResearchRunCreated(BaseModel):
@@ -164,11 +161,6 @@ async def create_research_run(
             f"too many research runs in flight ({len(in_flight)}); wait for them to finish.",
         )
 
-    # Validate article id if provided
-    if body.trend_article_id is not None:
-        if await session.get(TrendArticle, body.trend_article_id) is None:
-            raise HTTPException(404, "trend_article_id not found")
-
     run = Run(
         query=body.company_name,
         source_kind="research",
@@ -177,29 +169,15 @@ async def create_research_run(
         engines={
             "company_name": body.company_name,
             "domain_hint": body.domain_hint,
-            "trend_article_id": str(body.trend_article_id) if body.trend_article_id else None,
         },
     )
     session.add(run)
     await session.commit()
     await session.refresh(run)
 
-    # Pin run-id onto the article for the UI's "researched" badge.
-    if body.trend_article_id is not None:
-        article = await session.get(TrendArticle, body.trend_article_id)
-        if article is not None:
-            existing = list(article.research_run_ids or [])
-            if run.id not in existing:
-                existing.append(run.id)
-                article.research_run_ids = existing
-            if article.status not in ("researched",):
-                article.status = "researched"
-            await session.commit()
-
     params = ResearchParams(
         company_name=body.company_name,
         domain_hint=body.domain_hint,
-        trend_article_id=body.trend_article_id,
     )
     asyncio.create_task(_safe_execute(run.id, params))
 

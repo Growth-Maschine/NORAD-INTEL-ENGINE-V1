@@ -1,8 +1,7 @@
 """`run_events` table — append-only timeline of events per run.
 
-Powers the live SSE stream that drives the right-rail "Discovery Feed" on
-the Today page. Every engine call, stage transition, and significant log
-gets a row here. Cheap writes, cheap reads (single composite index).
+Powers the live SSE stream on research and web-discovery run pages. Every
+engine call, stage transition, and significant log gets a row here.
 """
 from __future__ import annotations
 
@@ -24,10 +23,6 @@ EVENT_KINDS = (
     "stage_started",
     "stage_completed",
     "engine_call",
-    "article_discovered",
-    "article_ranked",
-    "article_read",
-    "article_extracted",
     "company_extracted",
     "synthesis_started",
     "synthesis_completed",

@@ -1,44 +1,38 @@
 """SQLAlchemy ORM models for NORAD.
 
-Importing this package registers every model on `Base.metadata` — needed by
-Alembic to autogenerate / verify migrations.
+Importing this package registers every model on `Base.metadata`.
 
-Core (rev 0001):
-- `runs`      : a research run kicked off by a user (or later, by a bot)
-- `companies` : the canonical company record (one per company)
-- `cards`     : the full `CompanyCardV1` JSON, one row per research output
-- `signals`   : denormalized signals for fast timeline/filtering
-- `sources`   : denormalized sources for fast attribution lookup
+Core:
+- `runs`, `companies`, `cards`, `signals`, `sources`
 
-Discovery + observability (rev 0002):
-- `trend_articles` : one row per article surfaced by a discovery funnel
-- `run_events`     : append-only timeline of events per run (drives SSE)
-- `engine_calls`   : per-call cost + latency audit log
+Observability:
+- `run_events`, `engine_calls`, `app_kv`
+
+Web Discovery:
+- `web_discovery_clusters`, `web_discovery_queries`, `articles`
 """
 from app.models.app_kv import AppKV
+from app.models.article import Article
 from app.models.card import Card
 from app.models.company import Company
-from app.models.discovery_cluster import DiscoveryCluster
 from app.models.engine_call import EngineCall
 from app.models.run import Run
 from app.models.run_event import RunEvent
 from app.models.signal import Signal
 from app.models.source import Source
-from app.models.trend_article import TrendArticle
 from app.models.web_discovery_cluster import WebDiscoveryCluster
 from app.models.web_discovery_query import WebDiscoveryQuery
 
 __all__ = [
     "AppKV",
+    "Article",
     "Card",
     "Company",
-    "DiscoveryCluster",
     "EngineCall",
     "Run",
     "RunEvent",
     "Signal",
     "Source",
-    "TrendArticle",
     "WebDiscoveryCluster",
     "WebDiscoveryQuery",
 ]

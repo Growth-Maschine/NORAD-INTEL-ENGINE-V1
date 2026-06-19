@@ -1,4 +1,4 @@
-"""Structured file logger for both NORAD pipelines (research + discovery).
+"""Structured file logger for both NORAD pipelines (research + web_discovery).
 
 Why this exists
 ---------------
@@ -15,7 +15,7 @@ This module writes one JSONL line per pipeline event to
 Schema per line
 ---------------
     ts          ISO-8601 UTC
-    pipeline    "research" | "discovery"
+    pipeline    "research" | "web_discovery"
     stage       int | null (1..N)
     run_id      str | null
     kind        short slug ("run_started", "stage_completed", "synth_io", …)

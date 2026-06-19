@@ -1,9 +1,7 @@
-"""Server-Sent Events stream of `run_events` for the Today right-rail feed.
+"""Server-Sent Events stream of `run_events` for a run's live feed.
 
 Reads `run_events` rows for a given run and streams new ones as they appear.
-For v1 we poll the DB every 1s with **short-lived sessions per poll** — the
-generator never holds an AsyncSession across `await asyncio.sleep`, so we
-don't pin a pgbouncer-mode connection for the lifetime of the stream.
+Polls the DB every 1s with short-lived sessions per poll.
 
 Pagination uses a keyset cursor `(created_at, id)` to guarantee no event is
 dropped even when multiple rows share the same `created_at`.

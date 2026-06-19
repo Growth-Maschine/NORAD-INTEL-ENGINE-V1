@@ -9,12 +9,11 @@ python-dotenv==1.0.1
 # ── database
 sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
-# psycopg (sync) is used by Alembic — asyncpg is for the FastAPI app runtime.
+# psycopg (sync) is used by DDL scripts — asyncpg is for the FastAPI app runtime.
 psycopg[binary]==3.2.3
 
-# ── cache + job queue
+# ── cache (optional — /health/db connectivity probe)
 redis==5.2.0
-arq==0.26.1
 
 # ── research engines + LLM
 parallel-web>=0.5.0
