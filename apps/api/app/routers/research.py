@@ -6,6 +6,7 @@ Endpoints under `/api/research/*`:
     GET  /runs/:id                 — poll run status (SSE is preferred)
     GET  /cards/:id                — fetch a finished CompanyCardV1 (full JSON)
     GET  /companies                — list known companies (by latest card)
+    GET  /discovered               — Web Discovery mentions as companies rows
     GET  /companies/:id            — one company + its canonical card + lists
 
 Runs in-process via `asyncio.create_task` — no separate worker process.
@@ -26,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import get_session
-from app.models import Card, Company, Run, Signal, Source
+from app.models import Article, Card, Company, Run, Signal, Source, WebDiscoveryCluster
 from app.services.company_evidence import get_company_evidence
 from app.services.research import ResearchParams, execute_research
 
@@ -48,6 +49,7 @@ def _require_admin_in_prod(x_admin_token: str | None) -> None:
 class ResearchRunRequest(BaseModel):
     company_name: str = Field(..., min_length=1, max_length=200)
     domain_hint: str | None = Field(None, max_length=255)
+    company_id: uuid.UUID | None = None
 
 
 class ResearchRunCreated(BaseModel):
@@ -114,6 +116,26 @@ class CompanyDetail(BaseModel):
     sources: list[dict[str, Any]]
 
 
+class DiscoveredCompanyOut(BaseModel):
+    """One Web Discovery mention persisted as a ``companies`` row."""
+
+    id: uuid.UUID
+    company_name: str
+    website: str | None
+    industry: str | None
+    headquarters_country: str | None
+    discovery_role: str | None
+    discovery_context: str | None
+    source_article_id: uuid.UUID | None
+    article_title: str | None
+    article_url: str | None
+    cluster_id: uuid.UUID | None
+    cluster_name: str | None
+    canonical_card_id: uuid.UUID | None
+    score_overall: int | None = None
+    created_at: datetime
+
+
 class CompanyFeedRow(BaseModel):
     """One row on the Companies command-center page.
 
@@ -146,6 +168,18 @@ async def create_research_run(
 ) -> ResearchRunCreated:
     _require_admin_in_prod(x_admin_token)
 
+    company_id = body.company_id
+    company_name = body.company_name.strip()
+    domain_hint = body.domain_hint
+
+    if company_id is not None:
+        company = await session.get(Company, company_id)
+        if company is None:
+            raise HTTPException(404, "company not found")
+        company_name = company.company_name
+        if not domain_hint:
+            domain_hint = company.website or company.domain
+
     # Admission control — keep concurrent paid runs bounded.
     in_flight = (
         await session.execute(
@@ -162,13 +196,15 @@ async def create_research_run(
         )
 
     run = Run(
-        query=body.company_name,
+        query=company_name,
         source_kind="research",
         status="queued",
         progress_pct=0,
+        company_id=company_id,
         engines={
-            "company_name": body.company_name,
-            "domain_hint": body.domain_hint,
+            "company_name": company_name,
+            "domain_hint": domain_hint,
+            "company_id": str(company_id) if company_id else None,
         },
     )
     session.add(run)
@@ -176,15 +212,16 @@ async def create_research_run(
     await session.refresh(run)
 
     params = ResearchParams(
-        company_name=body.company_name,
-        domain_hint=body.domain_hint,
+        company_name=company_name,
+        domain_hint=domain_hint,
+        company_id=company_id,
     )
     asyncio.create_task(_safe_execute(run.id, params))
 
     return ResearchRunCreated(
         run_id=run.id,
         status="queued",
-        company_name=body.company_name,
+        company_name=company_name,
         sse_url=f"/api/events/runs/{run.id}",
         poll_url=f"/api/research/runs/{run.id}",
     )
@@ -289,6 +326,74 @@ async def list_companies(
         ).scalars().all():
             scores[c.id] = c.score_overall
     return [_company_to_out(r, scores.get(r.canonical_card_id) if r.canonical_card_id else None) for r in rows]
+
+
+# ── GET /discovered ──────────────────────────────────────────────────────────
+
+
+@router.get("/discovered", response_model=list[DiscoveredCompanyOut])
+async def list_discovered_companies(
+    limit: int = Query(100, ge=1, le=500),
+    cluster_id: uuid.UUID | None = None,
+    search: str | None = Query(None, max_length=200),
+    has_profile: bool | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> list[DiscoveredCompanyOut]:
+    """Web Discovery mentions stored as ``companies`` rows (``origin='web_discovery'``)."""
+    stmt = (
+        select(Company, Article, WebDiscoveryCluster)
+        .outerjoin(Article, Company.source_article_id == Article.id)
+        .outerjoin(WebDiscoveryCluster, Article.cluster_id == WebDiscoveryCluster.id)
+        .where(Company.origin == "web_discovery")
+        .order_by(Company.created_at.desc())
+        .limit(limit)
+    )
+    if cluster_id is not None:
+        stmt = stmt.where(Article.cluster_id == cluster_id)
+    if search:
+        like = f"%{search.strip()}%"
+        stmt = stmt.where(Company.company_name.ilike(like))
+    if has_profile is True:
+        stmt = stmt.where(Company.canonical_card_id.isnot(None))
+    elif has_profile is False:
+        stmt = stmt.where(Company.canonical_card_id.is_(None))
+
+    rows = (await session.execute(stmt)).all()
+    card_ids = [c.canonical_card_id for c, _, _ in rows if c.canonical_card_id]
+    scores: dict[uuid.UUID, int | None] = {}
+    if card_ids:
+        for card in (
+            await session.execute(select(Card).where(Card.id.in_(card_ids)))
+        ).scalars().all():
+            scores[card.id] = card.score_overall
+
+    out: list[DiscoveredCompanyOut] = []
+    for company, article, cluster in rows:
+        score = (
+            scores.get(company.canonical_card_id)
+            if company.canonical_card_id
+            else None
+        )
+        out.append(
+            DiscoveredCompanyOut(
+                id=company.id,
+                company_name=company.company_name,
+                website=company.website,
+                industry=company.industry,
+                headquarters_country=company.headquarters_country,
+                discovery_role=company.discovery_role,
+                discovery_context=company.discovery_context,
+                source_article_id=company.source_article_id,
+                article_title=article.title if article else None,
+                article_url=article.url if article else None,
+                cluster_id=article.cluster_id if article else None,
+                cluster_name=cluster.name if cluster else None,
+                canonical_card_id=company.canonical_card_id,
+                score_overall=score,
+                created_at=company.created_at,
+            )
+        )
+    return out
 
 
 # ── GET /feed ────────────────────────────────────────────────────────────────

@@ -2262,6 +2262,8 @@ async def _stage4_persist(
             company.headquarters_country = (
                 _extract_country(ident.headquarters) or company.headquarters_country
             )
+            if company.origin == "web_discovery":
+                company.origin = "research"
 
         # Insert Card. Set card_id on the model so it serializes into the JSONB.
         card_row = Card(

@@ -31,6 +31,7 @@ from app.models.article import Article
 from app.models.run import Run
 from app.models.web_discovery_cluster import WebDiscoveryCluster
 from app.models.web_discovery_query import WebDiscoveryQuery
+from app.services.discovery_companies import persist_discovery_companies, sync_article_discovery_companies
 from app.services.run_events import emit, set_pipeline
 
 logger = logging.getLogger(__name__)
@@ -663,13 +664,38 @@ async def _ingest_and_enrich_hit(
             await s.refresh(article)
         except IntegrityError:
             await s.rollback()
+            existing = (
+                await s.execute(select(Article).where(Article.url == url))
+            ).scalars().first()
+            if existing is None:
+                return {
+                    "url": url,
+                    "article_id": None,
+                    "ingest_status": "duplicate",
+                    "enriched": False,
+                    "executive_summary": None,
+                    "mentioned_companies": [],
+                    "enrich_cost_usd": 0.0,
+                }
+            if existing.summary and existing.mentioned_companies:
+                await sync_article_discovery_companies(s, existing)
+                await s.commit()
+                return {
+                    "url": url,
+                    "article_id": str(existing.id),
+                    "ingest_status": "duplicate",
+                    "enriched": True,
+                    "executive_summary": existing.summary,
+                    "mentioned_companies": list(existing.mentioned_companies or []),
+                    "enrich_cost_usd": 0.0,
+                }
             return {
                 "url": url,
-                "article_id": None,
+                "article_id": str(existing.id),
                 "ingest_status": "duplicate",
                 "enriched": False,
-                "executive_summary": None,
-                "mentioned_companies": [],
+                "executive_summary": existing.summary,
+                "mentioned_companies": list(existing.mentioned_companies or []),
                 "enrich_cost_usd": 0.0,
             }
 
@@ -704,6 +730,11 @@ async def _ingest_and_enrich_hit(
             row = await s.get(Article, article.id)
             if row is not None:
                 row.summary = summary
+                companies = await persist_discovery_companies(
+                    s,
+                    article_id=row.id,
+                    mentions=companies,
+                )
                 row.mentioned_companies = companies
                 await s.commit()
         await emit(
