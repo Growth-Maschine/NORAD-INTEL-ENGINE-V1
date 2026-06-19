@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
 import {
   ArrowLeft,
+  Building2,
   Calendar,
   ChevronDown,
   Copy,
@@ -22,10 +23,14 @@ import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/Dialog";
 import { PageBody } from "@/components/ui/PageBody";
 import {
+  getArticle,
   getWebDiscoveryCluster,
   getWebDiscoveryQuery,
   getWebDiscoveryQueryResults,
+  getWebDiscoveryRun,
   listWebDiscoveryClusterRuns,
+  startResearchRun,
+  type MentionedCompany,
   type WebDiscoveryQueryRun,
   type WebDiscoveryRun,
   type WebDiscoveryQueryResultsPayload,
@@ -95,9 +100,11 @@ export default function WebDiscoveryQueryResults() {
             item.title,
             item.url,
             item.summary,
+            item.executive_summary,
             item.snippet,
             item.author,
             ...(item.highlights ?? []),
+            ...(item.mentioned_companies ?? []).flatMap((c) => [c.name, c.context]),
           ]
             .filter(Boolean)
             .join(" ")
@@ -290,16 +297,16 @@ export default function WebDiscoveryQueryResults() {
               <p className="font-semibold text-ink">Reading guide</p>
               <ul className="mt-2 list-inside list-disc space-y-1.5">
                 <li>
-                  <span className="font-medium text-ink">Summary</span> — Exa-generated
-                  abstract when enabled.
+                  <span className="font-medium text-ink">Executive summary</span> — NORAD
+                  analysis tied to your search query.
                 </li>
                 <li>
-                  <span className="font-medium text-ink">Brief</span> — Exa summary plus
-                  a few supporting quotes (not raw page scrapes).
+                  <span className="font-medium text-ink">Companies</span> — entities
+                  mentioned in this story — use Deep research for a full company profile.
                 </li>
                 <li>
-                  <span className="font-medium text-ink">Page</span> — crawled body text
-                  when full-text mode is on.
+                  <span className="font-medium text-ink">Full article</span> — original
+                  crawled content from the source URL.
                 </li>
               </ul>
             </div>
@@ -352,6 +359,9 @@ function SourceCard({
   const hasQuotes = presentation.quotes.length > 0;
   const hasFaq = presentation.faqPairs.length > 0;
   const hasPage = presentation.pageParagraphs.length > 0;
+  const hasNoradAnalysis = Boolean(item.executive_summary?.trim());
+  const showExaExcerpts = !hasNoradAnalysis && (hasBrief || hasQuotes || hasFaq);
+  const showExaPage = !hasNoradAnalysis && hasPage;
 
   return (
     <article className="overflow-hidden rounded-2xl border border-border bg-white shadow-soft transition hover:border-accent/25">
@@ -397,6 +407,15 @@ function SourceCard({
                 <MetaPill icon={Calendar}>{published}</MetaPill>
               ) : null}
               {item.author ? <MetaPill icon={User}>{item.author}</MetaPill> : null}
+              {item.ingest_status === "duplicate" ? (
+                <span className="inline-flex rounded-full border border-border bg-tint px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted">
+                  Previously ingested
+                </span>
+              ) : item.enriched ? (
+                <span className="inline-flex rounded-full border border-[#BDE6D3] bg-[#ECF8F1] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#155A3E]">
+                  Analyzed
+                </span>
+              ) : null}
               {scorePct != null ? (
                 <span className="inline-flex items-center gap-2 rounded-full border border-[#BDE6D3] bg-[#ECF8F1] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#155A3E]">
                   Relevance
@@ -411,20 +430,39 @@ function SourceCard({
               ) : null}
             </div>
 
-            {!hasBrief && !hasQuotes && !hasFaq ? (
+            {!hasNoradAnalysis && !hasBrief && !hasQuotes && !hasFaq ? (
               <div className="mt-4 rounded-lg border border-amber-200/80 bg-amber-50/60 px-3 py-2.5 text-xs text-amber-900">
-                Limited structured content from Exa for this URL. Enable{" "}
-                <span className="font-semibold">Summary</span> on the query for an AI brief,
-                or open the source directly.
+                Limited content for this URL. Enable{" "}
+                <span className="font-semibold">Highlights</span> or{" "}
+                <span className="font-semibold">Full text</span> on the query, then run
+                again.
               </div>
             ) : null}
 
-            {hasBrief ? (
+            {item.executive_summary ? (
               <section className="mt-5 rounded-2xl border border-[#D4E8D0]/80 bg-gradient-to-b from-[#F6FBF7] to-white px-4 py-4 sm:px-5">
                 <div className="flex items-center gap-2">
                   <Sparkles className="h-4 w-4 text-[#3D7A4E]" />
                   <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#3D7A4E]">
-                    Intelligence brief
+                    Executive summary
+                  </h3>
+                </div>
+                <p className="mt-3 text-[15px] leading-[1.8] tracking-[0.01em] text-ink">
+                  {item.executive_summary}
+                </p>
+              </section>
+            ) : null}
+
+            {item.mentioned_companies && item.mentioned_companies.length > 0 ? (
+              <CompaniesSection companies={item.mentioned_companies} />
+            ) : null}
+
+            {hasBrief && showExaExcerpts ? (
+              <section className="mt-5 rounded-2xl border border-border/80 bg-[#FAFAF8] px-4 py-4 sm:px-5">
+                <div className="flex items-center gap-2">
+                  <Highlighter className="h-4 w-4 text-soft" />
+                  <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-soft">
+                    Source excerpts (Exa)
                   </h3>
                 </div>
                 <div className="mt-3 max-w-none space-y-3.5">
@@ -440,7 +478,7 @@ function SourceCard({
               </section>
             ) : null}
 
-            {hasQuotes ? (
+            {hasQuotes && showExaExcerpts ? (
               <section className="mt-5">
                 <div className="mb-3 flex items-center gap-2">
                   <Highlighter className="h-4 w-4 text-soft" />
@@ -463,7 +501,7 @@ function SourceCard({
               </section>
             ) : null}
 
-            {hasFaq ? (
+            {hasFaq && showExaExcerpts ? (
               <section className="mt-5">
                 <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-soft">
                   Key Q&amp;A from page
@@ -484,7 +522,7 @@ function SourceCard({
               </section>
             ) : null}
 
-            {hasPage ? (
+            {showExaPage ? (
               <details
                 className="mt-5 group rounded-xl border border-border/80 bg-[#FAFAF8]"
                 open={pageOpen}
@@ -493,7 +531,7 @@ function SourceCard({
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-medium text-ink [&::-webkit-details-marker]:hidden">
                   <span className="inline-flex items-center gap-2">
                     <FileText className="h-4 w-4 text-soft" />
-                    Full page text
+                    Full page text (Exa)
                     <span className="text-xs font-normal text-soft">
                       ({presentation.pageParagraphs.length} paragraphs)
                     </span>
@@ -515,6 +553,8 @@ function SourceCard({
               </details>
             ) : null}
 
+            <ArticleBodySection item={item} expandDefault={expandPage} />
+
             <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
               <Button
                 type="button"
@@ -534,7 +574,17 @@ function SourceCard({
                 <Copy className="h-3.5 w-3.5" />
                 Copy URL
               </Button>
-              {item.summary ? (
+              {item.executive_summary ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => copyText(item.executive_summary!, "Summary copied")}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  Copy summary
+                </Button>
+              ) : item.summary ? (
                 <Button
                   type="button"
                   variant="ghost"
@@ -542,7 +592,7 @@ function SourceCard({
                   onClick={() => copyText(item.summary!, "Summary copied")}
                 >
                   <Copy className="h-3.5 w-3.5" />
-                  Copy summary
+                  Copy Exa summary
                 </Button>
               ) : null}
               <span className="min-w-0 flex-1 truncate text-[11px] text-soft" title={item.url}>
@@ -554,6 +604,183 @@ function SourceCard({
       </div>
     </article>
   );
+}
+
+function CompaniesSection({ companies }: { companies: MentionedCompany[] }) {
+  const navigate = useNavigate();
+  const [profiling, setProfiling] = useState<string | null>(null);
+
+  const onProfile = async (company: MentionedCompany) => {
+    setProfiling(company.name);
+    try {
+      const run = await startResearchRun({
+        company_name: company.name,
+        domain_hint: company.hint_url ?? undefined,
+      });
+      toast.success(`Research started for ${company.name}`);
+      navigate(`/runs/${run.run_id}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to start research");
+    } finally {
+      setProfiling(null);
+    }
+  };
+
+  return (
+    <section className="mt-5">
+      <div className="mb-3 flex items-center gap-2">
+        <Building2 className="h-4 w-4 text-soft" />
+        <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-soft">
+          Companies in this story
+        </h3>
+      </div>
+      <ul className="space-y-3">
+        {companies.map((company) => (
+          <li
+            key={company.name}
+            className="rounded-xl border border-border/80 bg-white px-4 py-3"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-ink">{company.name}</p>
+                {company.role_in_story ? (
+                  <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-soft">
+                    {company.role_in_story}
+                  </p>
+                ) : null}
+                <p className="mt-1.5 text-sm leading-relaxed text-muted">
+                  {company.context}
+                </p>
+                {(company.industry || company.hq_or_market) && (
+                  <p className="mt-1 text-xs text-soft">
+                    {[company.industry, company.hq_or_market].filter(Boolean).join(" · ")}
+                  </p>
+                )}
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={profiling === company.name}
+                onClick={() => onProfile(company)}
+              >
+                {profiling === company.name ? "Starting…" : "Deep research"}
+              </Button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function ArticleBodySection({
+  item,
+  expandDefault = false,
+}: {
+  item: WebDiscoveryResultItem;
+  expandDefault?: boolean;
+}) {
+  const [open, setOpen] = useState(expandDefault);
+  const articleQuery = useQuery({
+    queryKey: ["article-body", item.article_id],
+    queryFn: () => getArticle(item.article_id!),
+    enabled: !!item.article_id,
+  });
+
+  const rawBody =
+    (articleQuery.data?.body_text ?? "").trim() ||
+    (item.text ?? "").trim() ||
+    (item.highlights ?? []).join("\n\n").trim();
+
+  const body = useMemo(() => formatArticleBody(rawBody), [rawBody]);
+
+  useEffect(() => {
+    setOpen(expandDefault);
+  }, [expandDefault]);
+
+  if (!body && !articleQuery.isLoading) return null;
+
+  const paragraphs = body
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  return (
+    <details
+      className="mt-5 group rounded-xl border border-[#E8E4DC]/90 bg-[#FDFCFA]"
+      open={open}
+      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+    >
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-medium text-ink [&::-webkit-details-marker]:hidden">
+        <span className="inline-flex items-center gap-2">
+          <FileText className="h-4 w-4 text-soft" />
+          Full article
+          <span className="text-xs font-normal text-soft">
+            {paragraphs.length > 0
+              ? `(${paragraphs.length} section${paragraphs.length === 1 ? "" : "s"})`
+              : "(loading…)"}
+          </span>
+        </span>
+        <ChevronDown className="h-4 w-4 text-soft transition group-open:rotate-180" />
+      </summary>
+      <div className="max-h-[32rem] overflow-y-auto border-t border-border/60 px-4 py-4 sm:px-5">
+        {articleQuery.isLoading && paragraphs.length === 0 ? (
+          <p className="text-sm text-soft">Loading article…</p>
+        ) : (
+          <div className="space-y-3.5">
+            {paragraphs.map((paragraph, i) => (
+              <p key={i} className="text-[15px] leading-[1.8] text-ink">
+                {paragraph}
+              </p>
+            ))}
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
+/** Clean Exa highlight crumbs into readable paragraphs. */
+function formatArticleBody(text: string): string {
+  const raw = (text ?? "").trim();
+  if (!raw) return "";
+
+  const lines: string[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const stripped = line.trim();
+    if (!stripped) {
+      lines.push("");
+      continue;
+    }
+    if (/^#{1,6}\s/.test(stripped)) continue;
+    if (/^[\|\-\s:]+$/.test(stripped)) continue;
+    const cleaned = stripped
+      .replace(/\s*\.\.\.\s*/g, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+    if (cleaned.length < 3) continue;
+    lines.push(cleaned);
+  }
+
+  const merged: string[] = [];
+  let buf: string[] = [];
+  const flush = () => {
+    if (buf.length) {
+      merged.push(buf.join(" "));
+      buf = [];
+    }
+  };
+  for (const line of lines) {
+    if (!line) {
+      flush();
+      continue;
+    }
+    buf.push(line);
+  }
+  flush();
+
+  return merged.join("\n\n");
 }
 
 function RunIntelPanel({
@@ -570,6 +797,20 @@ function RunIntelPanel({
   const [, setSearchParams] = useSearchParams();
 
   const activeRunId = runId ?? payload?.run_id;
+  const runDetailQuery = useQuery({
+    queryKey: ["web-discovery-run-detail", activeRunId],
+    queryFn: () => getWebDiscoveryRun(activeRunId!),
+    enabled: !!activeRunId,
+  });
+  const runOutputs = runDetailQuery.data?.engine_outputs as
+    | {
+        new_articles?: number;
+        enriched?: number;
+        duplicates_skipped?: number;
+        total_cost_usd?: number;
+      }
+    | undefined;
+
   const matchedRun = runs?.find((run) => run.id === activeRunId) ?? runs?.[0];
   const queryLabel = payload?.query_label ?? "Query";
   const currentRun: WebDiscoveryQueryRun | undefined =
@@ -618,6 +859,15 @@ function RunIntelPanel({
           </span>
           {currentRun.result_count > 0 ? (
             <span>{currentRun.result_count} sources</span>
+          ) : null}
+          {runOutputs?.new_articles != null ? (
+            <span>{runOutputs.new_articles} new articles</span>
+          ) : null}
+          {runOutputs?.enriched != null ? (
+            <span>{runOutputs.enriched} analyzed</span>
+          ) : null}
+          {runOutputs?.duplicates_skipped ? (
+            <span>{runOutputs.duplicates_skipped} skipped (dup)</span>
           ) : null}
           {activeRunId ? (
             <span className="font-mono">ID {activeRunId.slice(0, 8)}…</span>

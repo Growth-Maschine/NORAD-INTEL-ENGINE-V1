@@ -15,7 +15,7 @@ export class ApiError extends Error {
 /** Strip a trailing slash so `${BASE}${path}` doesn't double up. */
 const API_BASE = (import.meta.env.VITE_API_URL ?? "").replace(/\/+$/, "");
 
-/** Shared bearer for admin-only write routes (research/discovery/settings).
+/** Shared bearer for admin-only write routes (research/web-discovery/settings).
  *  Backend requires `X-Admin-Token` matching NORAD_ADMIN_TOKEN in prod.
  *  Bundled into the JS bundle — anyone with the URL can read it via DevTools,
  *  so treat it as a soft gate, not a security boundary. */
@@ -63,67 +63,9 @@ export interface HealthDbResponse {
 export const getHealth = () => api<HealthResponse>("/health");
 export const getHealthDb = () => api<HealthDbResponse>("/health/db");
 
-// All discovery + events endpoints already include the `/api` prefix.
+// Web-discovery + events endpoints include the `/api` prefix.
 
-// ── Discovery types ──────────────────────────────────────────────────────────
-
-export interface DiscoveryCluster {
-  id: string;
-  name: string;
-  slug: string;
-  group_name: string;
-  description: string | null;
-  keywords: string[];
-  is_enabled: boolean;
-  is_default: boolean;
-  sort_order: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface DiscoveryClusterGroups {
-  groups: Record<string, DiscoveryCluster[]>;
-  default_cluster_id: string | null;
-}
-
-export interface DiscoveryClusterInput {
-  name: string;
-  group_name: string;
-  description?: string | null;
-  keywords: string[];
-  is_enabled?: boolean;
-  is_default?: boolean;
-}
-
-// Legacy category picker compatibility types.
-// Kept so older UI components compile while Discovery Clusters fully replace
-// category taxonomy on Today.
-export interface CategoryRef {
-  slug: string;
-  label: string;
-  th_url: string;
-}
-export interface CategoryGroups {
-  groups: Record<string, CategoryRef[]>;
-}
-
-export interface DiscoveryRunRequest {
-  cluster_id: string;
-  restrict_to_trendhunter_domain?: boolean;
-  date_from?: string | null;
-  date_to?: string | null;
-  max_articles?: number;
-}
-
-export interface DiscoveryRunCreated {
-  run_id: string;
-  status: string;
-  cluster_id: string;
-  cluster_name: string;
-  restrict_to_trendhunter_domain: boolean;
-  sse_url: string;
-  poll_url: string;
-}
+// Shared run/event types (SSE feed + research polling).
 
 export type RunStatusName =
   | "queued"
@@ -146,38 +88,6 @@ export interface RunStatus {
   created_at: string;
 }
 
-export interface ExtractedCompany {
-  name: string;
-  excerpt: string;
-  hint_url?: string | null;
-}
-
-export type ArticleStatus =
-  | "discovered"
-  | "ranked"
-  | "read"
-  | "extracted"
-  | "dismissed"
-  | "researched";
-
-export interface Article {
-  id: string;
-  url: string;
-  source: string;
-  category: string | null;
-  title: string | null;
-  dek: string | null;
-  image_url: string | null;
-  published_date: string | null;
-  summary: string | null;
-  relevance_score: number | null;
-  relevance_reason: string | null;
-  status: ArticleStatus;
-  extracted_companies: ExtractedCompany[];
-  discovery_run_id: string | null;
-  created_at: string;
-}
-
 export interface RunEvent {
   id: string;
   run_id: string;
@@ -187,78 +97,6 @@ export interface RunEvent {
   meta: Record<string, unknown>;
   created_at: string;
 }
-
-// ── Discovery endpoints ──────────────────────────────────────────────────────
-
-export const getDiscoveryClusters = () =>
-  api<DiscoveryClusterGroups>("/api/discovery/clusters");
-
-export const getCategories = async (): Promise<CategoryGroups> => {
-  const data = await getDiscoveryClusters();
-  const groups: Record<string, CategoryRef[]> = {};
-  for (const [group, items] of Object.entries(data.groups)) {
-    groups[group] = items
-      .filter((c) => c.is_enabled)
-      .map((c) => ({
-        slug: c.slug,
-        label: c.name,
-        th_url: "",
-      }));
-  }
-  return { groups };
-};
-
-export const createDiscoveryCluster = (body: DiscoveryClusterInput) =>
-  api<DiscoveryCluster>("/api/discovery/clusters", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-
-export const updateDiscoveryCluster = (
-  id: string,
-  body: DiscoveryClusterInput,
-) =>
-  api<DiscoveryCluster>(`/api/discovery/clusters/${id}`, {
-    method: "PUT",
-    body: JSON.stringify(body),
-  });
-
-export const deleteDiscoveryCluster = (id: string) =>
-  api<{ ok: boolean }>(`/api/discovery/clusters/${id}`, { method: "DELETE" });
-
-export const startDiscoveryRun = (body: DiscoveryRunRequest) =>
-  api<DiscoveryRunCreated>("/api/discovery/runs", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-
-export const getRun = (id: string) => api<RunStatus>(`/api/discovery/runs/${id}`);
-
-export const listRuns = (limit = 20, sourceKind?: string) => {
-  const q = new URLSearchParams({ limit: String(limit) });
-  if (sourceKind) q.set("source_kind", sourceKind);
-  return api<RunStatus[]>(`/api/discovery/runs?${q.toString()}`);
-};
-
-export interface ArticleQuery {
-  category?: string;
-  status?: ArticleStatus | "all";
-  run_id?: string;
-  min_score?: number;
-  limit?: number;
-}
-export const listArticles = (q: ArticleQuery = {}) => {
-  const sp = new URLSearchParams();
-  if (q.category) sp.set("category", q.category);
-  if (q.status) sp.set("status", q.status);
-  if (q.run_id) sp.set("run_id", q.run_id);
-  if (q.min_score != null) sp.set("min_score", String(q.min_score));
-  if (q.limit != null) sp.set("limit", String(q.limit));
-  return api<Article[]>(`/api/discovery/articles?${sp.toString()}`);
-};
-
-export const dismissArticle = (id: string) =>
-  api<Article>(`/api/discovery/articles/${id}/dismiss`, { method: "POST" });
 
 export const recentRunEvents = (runId: string, limit = 50) =>
   api<RunEvent[]>(`/api/events/runs/${runId}/recent?limit=${limit}`);
@@ -481,6 +319,11 @@ export interface WebDiscoveryResultItem {
   image: string | null;
   favicon: string | null;
   author: string | null;
+  article_id?: string | null;
+  ingest_status?: "created" | "duplicate" | "failed" | null;
+  executive_summary?: string | null;
+  mentioned_companies?: MentionedCompany[];
+  enriched?: boolean | null;
 }
 
 export interface WebDiscoveryQueryResultsPayload {
@@ -508,12 +351,66 @@ export const getWebDiscoveryQueryResults = (queryId: string, runId?: string) => 
   );
 };
 
+export interface MentionedCompany {
+  name: string;
+  context: string;
+  hint_url?: string | null;
+  industry?: string | null;
+  hq_or_market?: string | null;
+  role_in_story?: string | null;
+}
+
+export interface Article {
+  id: string;
+  url: string;
+  title: string;
+  summary: string | null;
+  body_text: string | null;
+  source_name: string | null;
+  published_at: string | null;
+  ingested_at: string;
+  cluster_id: string | null;
+  query_run_id: string | null;
+  source_query_id: string | null;
+  category_tag: string | null;
+  priority_score: number | null;
+  mentioned_companies: MentionedCompany[];
+  source_metadata: Record<string, unknown>;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ArticleQuery {
+  cluster_id?: string;
+  query_run_id?: string;
+  source_query_id?: string;
+  status?: string;
+  limit?: number;
+}
+
+export const listArticles = (q: ArticleQuery = {}) => {
+  const sp = new URLSearchParams();
+  if (q.cluster_id) sp.set("cluster_id", q.cluster_id);
+  if (q.query_run_id) sp.set("query_run_id", q.query_run_id);
+  if (q.source_query_id) sp.set("source_query_id", q.source_query_id);
+  if (q.status) sp.set("status", q.status);
+  if (q.limit != null) sp.set("limit", String(q.limit));
+  const qs = sp.toString();
+  return api<Article[]>(`/api/web-discovery/articles${qs ? `?${qs}` : ""}`);
+};
+
+export const getArticle = (id: string) =>
+  api<Article>(`/api/web-discovery/articles/${id}`);
+
+export const dismissArticle = (id: string) =>
+  api<Article>(`/api/web-discovery/articles/${id}/dismiss`, { method: "POST" });
+
 // ── Research types + endpoints ───────────────────────────────────────────────
 
 export interface ResearchRunRequest {
   company_name: string;
   domain_hint?: string | null;
-  trend_article_id?: string | null;
 }
 
 export interface ResearchRunCreated {
