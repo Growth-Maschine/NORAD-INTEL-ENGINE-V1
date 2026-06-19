@@ -358,6 +358,7 @@ export interface MentionedCompany {
   industry?: string | null;
   hq_or_market?: string | null;
   role_in_story?: string | null;
+  company_id?: string | null;
 }
 
 export interface Article {
@@ -411,6 +412,7 @@ export const dismissArticle = (id: string) =>
 export interface ResearchRunRequest {
   company_name: string;
   domain_hint?: string | null;
+  company_id?: string | null;
 }
 
 export interface ResearchRunCreated {
@@ -714,6 +716,43 @@ export interface CompanyFeedRow {
 
 export const listCompanyFeed = (limit = 50) =>
   api<CompanyFeedRow[]>(`/api/research/feed?limit=${limit}`);
+
+export interface DiscoveredCompanyRow {
+  id: string;
+  company_name: string;
+  website: string | null;
+  industry: string | null;
+  headquarters_country: string | null;
+  discovery_role: string | null;
+  discovery_context: string | null;
+  source_article_id: string | null;
+  article_title: string | null;
+  article_url: string | null;
+  cluster_id: string | null;
+  cluster_name: string | null;
+  canonical_card_id: string | null;
+  score_overall: number | null;
+  created_at: string;
+}
+
+export interface DiscoveredCompanyQuery {
+  limit?: number;
+  cluster_id?: string;
+  search?: string;
+  has_profile?: boolean;
+}
+
+export const listDiscoveredCompanies = (q: DiscoveredCompanyQuery = {}) => {
+  const sp = new URLSearchParams();
+  if (q.limit != null) sp.set("limit", String(q.limit));
+  if (q.cluster_id) sp.set("cluster_id", q.cluster_id);
+  if (q.search) sp.set("search", q.search);
+  if (q.has_profile != null) sp.set("has_profile", String(q.has_profile));
+  const qs = sp.toString();
+  return api<DiscoveredCompanyRow[]>(
+    `/api/research/discovered${qs ? `?${qs}` : ""}`,
+  );
+};
 
 // ── Settings types ───────────────────────────────────────────────────────────
 

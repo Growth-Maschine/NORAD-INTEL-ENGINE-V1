@@ -616,6 +616,7 @@ function CompaniesSection({ companies }: { companies: MentionedCompany[] }) {
       const run = await startResearchRun({
         company_name: company.name,
         domain_hint: company.hint_url ?? undefined,
+        company_id: company.company_id ?? undefined,
       });
       toast.success(`Research started for ${company.name}`);
       navigate(`/runs/${run.run_id}`);
@@ -637,7 +638,7 @@ function CompaniesSection({ companies }: { companies: MentionedCompany[] }) {
       <ul className="space-y-3">
         {companies.map((company) => (
           <li
-            key={company.name}
+            key={company.company_id ?? company.name}
             className="rounded-xl border border-border/80 bg-white px-4 py-3"
           >
             <div className="flex flex-wrap items-start justify-between gap-3">

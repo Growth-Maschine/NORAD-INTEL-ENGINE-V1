@@ -4,16 +4,20 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  ExternalLink,
   Loader2,
   Radio,
+  Search,
   XCircle,
   XOctagon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 
 import { Topbar } from "@/components/layout/Topbar";
 import { RunFeed } from "@/components/runs/RunFeed";
+import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { ConfirmDialog } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -23,10 +27,16 @@ import {
   cancelResearchRun,
   getCompany,
   listCompanyFeed,
+  listDiscoveredCompanies,
+  listWebDiscoveryClusters,
+  startResearchRun,
   type CompanyDetail,
   type CompanyFeedRow,
+  type DiscoveredCompanyRow,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+
+type CompaniesTab = "profiles" | "discovered";
 
 /**
  * Companies — research command center.
@@ -41,6 +51,60 @@ import { cn } from "@/lib/utils";
  * Sort: live runs first (amber pulse), then by latest-run recency desc.
  */
 export default function Companies() {
+  const [tab, setTab] = useState<CompaniesTab>("profiles");
+
+  return (
+    <>
+      <Topbar
+        title="Companies"
+        subtitle={
+          tab === "profiles"
+            ? "Deep research profiles and live run activity."
+            : "Companies extracted from Web Discovery articles."
+        }
+      />
+      <PageBody>
+        <div className="mb-5 flex flex-wrap gap-2">
+          <TabButton active={tab === "profiles"} onClick={() => setTab("profiles")}>
+            Profiles
+          </TabButton>
+          <TabButton active={tab === "discovered"} onClick={() => setTab("discovered")}>
+            Discovered
+          </TabButton>
+        </div>
+
+        {tab === "profiles" ? <ProfilesTab /> : <DiscoveredTab />}
+      </PageBody>
+    </>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-lg border px-3 py-1.5 text-sm font-medium transition",
+        active
+          ? "border-ink bg-ink text-white"
+          : "border-border bg-white text-muted hover:border-ink/30 hover:text-ink",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ProfilesTab() {
   const feedQuery = useQuery({
     queryKey: ["company-feed"],
     queryFn: () => listCompanyFeed(50),
@@ -96,55 +160,217 @@ export default function Companies() {
 
   return (
     <>
-      <Topbar
-        title="Companies"
-        subtitle={
-          rows.length === 0
-            ? "Start a Profile research run from Companies or Web Discovery."
-            : `${rows.length} profile${rows.length === 1 ? "" : "s"} · ${rows.filter((r) => r.is_live).length} running`
-        }
-      />
-      <PageBody>
-        {feedQuery.isLoading && (
-          <div className="rounded-xl border border-dashed border-border bg-white px-6 py-16 text-center text-sm text-soft">
-            <Loader2 className="mx-auto mb-3 h-5 w-5 animate-spin" />
-            Loading the feed…
-          </div>
-        )}
+      {feedQuery.isLoading && (
+        <div className="rounded-xl border border-dashed border-border bg-white px-6 py-16 text-center text-sm text-soft">
+          <Loader2 className="mx-auto mb-3 h-5 w-5 animate-spin" />
+          Loading the feed…
+        </div>
+      )}
 
-        {!feedQuery.isLoading && rows.length === 0 && (
-          <EmptyState
-            icon={Building2}
-            title="No profiles yet"
-            description="Run Profile on a company from Web Discovery results or add one manually. Completed runs show up here."
-          />
-        )}
+      {!feedQuery.isLoading && rows.length === 0 && (
+        <EmptyState
+          icon={Building2}
+          title="No profiles yet"
+          description="Run Deep research on a company from Web Discovery results or the Discovered tab. Completed runs show up here."
+        />
+      )}
 
-        {rows.length > 0 && (
-          <section className="grid gap-6 lg:grid-cols-[340px_1fr]">
-            {/* Activity log — left rail, sticky */}
-            <aside className="lg:sticky lg:top-4 lg:h-[calc(100vh-6rem)]">
-              <RunFeed
-                runId={focusedRunId}
-                historical={!focusedIsLive}
+      {rows.length > 0 && (
+        <section className="grid gap-6 lg:grid-cols-[340px_1fr]">
+          <aside className="lg:sticky lg:top-4 lg:h-[calc(100vh-6rem)]">
+            <RunFeed runId={focusedRunId} historical={!focusedIsLive} />
+          </aside>
+
+          <div className="min-w-0 space-y-3">
+            {rows.map((r) => (
+              <CompanyRow
+                key={r.bucket_key}
+                row={r}
+                open={!!expanded[r.bucket_key]}
+                onToggle={() => toggle(r.bucket_key)}
               />
-            </aside>
-
-            {/* Company list — main column */}
-            <div className="min-w-0 space-y-3">
-              {rows.map((r) => (
-                <CompanyRow
-                  key={r.bucket_key}
-                  row={r}
-                  open={!!expanded[r.bucket_key]}
-                  onToggle={() => toggle(r.bucket_key)}
-                />
-              ))}
-            </div>
-          </section>
-        )}
-      </PageBody>
+            ))}
+          </div>
+        </section>
+      )}
     </>
+  );
+}
+
+function DiscoveredTab() {
+  const navigate = useNavigate();
+  const [search, setSearch] = useState("");
+  const [clusterId, setClusterId] = useState("");
+  const [profileFilter, setProfileFilter] = useState<"all" | "yes" | "no">("all");
+  const [profilingId, setProfilingId] = useState<string | null>(null);
+
+  const clustersQuery = useQuery({
+    queryKey: ["web-discovery-clusters"],
+    queryFn: listWebDiscoveryClusters,
+  });
+  const clusters = clustersQuery.data?.clusters ?? [];
+
+  const discoveredQuery = useQuery({
+    queryKey: ["discovered-companies", search, clusterId, profileFilter],
+    queryFn: () =>
+      listDiscoveredCompanies({
+        limit: 100,
+        search: search.trim() || undefined,
+        cluster_id: clusterId || undefined,
+        has_profile:
+          profileFilter === "all"
+            ? undefined
+            : profileFilter === "yes",
+      }),
+    refetchInterval: 15000,
+  });
+  const rows = discoveredQuery.data ?? [];
+
+  const onProfile = async (row: DiscoveredCompanyRow) => {
+    setProfilingId(row.id);
+    try {
+      const run = await startResearchRun({
+        company_name: row.company_name,
+        domain_hint: row.website ?? undefined,
+        company_id: row.id,
+      });
+      toast.success(`Research started for ${row.company_name}`);
+      navigate(`/runs/${run.run_id}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to start research");
+    } finally {
+      setProfilingId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="relative min-w-[220px] flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-soft" />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search company name…"
+            className="w-full rounded-lg border border-border bg-white py-2 pl-9 pr-3 text-sm outline-none ring-ink/20 focus:ring-2"
+          />
+        </label>
+        <select
+          value={clusterId}
+          onChange={(e) => setClusterId(e.target.value)}
+          className="rounded-lg border border-border bg-white px-3 py-2 text-sm outline-none ring-ink/20 focus:ring-2"
+        >
+          <option value="">All clusters</option>
+          {clusters.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={profileFilter}
+          onChange={(e) =>
+            setProfileFilter(e.target.value as "all" | "yes" | "no")
+          }
+          className="rounded-lg border border-border bg-white px-3 py-2 text-sm outline-none ring-ink/20 focus:ring-2"
+        >
+          <option value="all">All mentions</option>
+          <option value="no">Not profiled</option>
+          <option value="yes">Has profile</option>
+        </select>
+      </div>
+
+      {discoveredQuery.isLoading && (
+        <div className="rounded-xl border border-dashed border-border bg-white px-6 py-16 text-center text-sm text-soft">
+          <Loader2 className="mx-auto mb-3 h-5 w-5 animate-spin" />
+          Loading discovered companies…
+        </div>
+      )}
+
+      {!discoveredQuery.isLoading && rows.length === 0 && (
+        <EmptyState
+          icon={Building2}
+          title="No discovered companies yet"
+          description="Run Web Discovery queries with Sonnet enrich enabled. Companies mentioned in articles appear here with a stable ID linked to the source story."
+        />
+      )}
+
+      {rows.length > 0 && (
+        <ul className="space-y-3">
+          {rows.map((row) => (
+            <li
+              key={row.id}
+              className="rounded-xl border border-border/80 bg-white px-4 py-3"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-semibold text-ink">{row.company_name}</p>
+                    {row.canonical_card_id ? (
+                      <Pill variant="accent">Profiled</Pill>
+                    ) : null}
+                    {row.cluster_name ? (
+                      <Pill>{row.cluster_name}</Pill>
+                    ) : null}
+                  </div>
+                  {row.discovery_role ? (
+                    <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-soft">
+                      {row.discovery_role}
+                    </p>
+                  ) : null}
+                  {row.discovery_context ? (
+                    <p className="mt-1.5 text-sm leading-relaxed text-muted">
+                      {row.discovery_context}
+                    </p>
+                  ) : null}
+                  {(row.industry || row.headquarters_country) && (
+                    <p className="mt-1 text-xs text-soft">
+                      {[row.industry, row.headquarters_country]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                  )}
+                  {row.article_title && row.article_url ? (
+                    <a
+                      href={row.article_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 inline-flex items-center gap-1 text-xs text-muted underline-offset-2 hover:underline"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      {row.article_title}
+                    </a>
+                  ) : row.article_title ? (
+                    <p className="mt-2 text-xs text-soft">{row.article_title}</p>
+                  ) : null}
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-2">
+                  {row.canonical_card_id ? (
+                    <Link
+                      to={`/companies/${row.id}`}
+                      className="text-xs font-medium text-ink underline-offset-2 hover:underline"
+                    >
+                      Open profile
+                    </Link>
+                  ) : (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      disabled={profilingId === row.id}
+                      onClick={() => onProfile(row)}
+                    >
+                      {profilingId === row.id ? "Starting…" : "Deep research"}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
