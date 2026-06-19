@@ -1,8 +1,10 @@
 -- 0003 — create discovery_clusters table + seed default cluster packs.
+-- SUPERSEDED by 0007_drop_today_legacy.sql (Today page removed).
+-- Kept for migration audit trail on databases that applied 0003 before 0007.
 --
 -- Apply with:
 --
---     psql "$SUPABASE_DATABASE_URL_pool" -f apps/api/sql/0003_discovery_clusters.sql
+--     psql "$GCP_DATABASE_URL_POOL" -f apps/api/sql/0003_discovery_clusters.sql
 
 BEGIN;
 

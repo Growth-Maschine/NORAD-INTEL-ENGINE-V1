@@ -1,7 +1,7 @@
 -- 0004 — add web_discovery_clusters + web_discovery_queries tables.
 --
 -- Apply with:
---   psql "$SUPABASE_DATABASE_URL_pool" -f apps/api/sql/0004_web_discovery_clusters_queries.sql
+--   psql "$GCP_DATABASE_URL_POOL" -f apps/api/sql/0004_web_discovery_clusters_queries.sql
 
 BEGIN;
 

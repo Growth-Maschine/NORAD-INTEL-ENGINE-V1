@@ -1,7 +1,10 @@
 # NORAD — Deployment & Local Setup
 
 Monorepo: FastAPI backend in `apps/api`, React/Vite frontend in `apps/web`.
-Database is hosted Supabase Postgres; cache/queue is Upstash Redis.
+Database is **GCP Cloud SQL Postgres**. Redis is optional (health probe only).
+
+Research and web-discovery runs execute in the API process (`asyncio.create_task`) —
+no separate worker service.
 
 ---
 
@@ -27,13 +30,6 @@ npm run dev                   # http://localhost:5000
 The Vite dev server proxies `/api` and `/health` to `http://127.0.0.1:8000`,
 so you don't need to set `VITE_API_URL` locally.
 
-To process research and web discovery runs you also need the arq worker:
-
-```bash
-cd apps/api
-arq app.workers.settings.WorkerSettings
-```
-
 ---
 
 ## Deploy — Backend on Railway
@@ -47,21 +43,13 @@ arq app.workers.settings.WorkerSettings
 4. In the **Variables** tab, paste every var from `apps/api/.env.example`
    with real values. Critical ones:
    - `ANTHROPIC_API_KEY`, `PARALLEL_API_KEY`, `EXA_API_KEY`
-   - `SUPABASE_DATABASE_URL` (use the **pooled** asyncpg URL on port 6543)
-   - `REDIS_URL`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
+   - `GCP_DATABASE_URL` — asyncpg URL (port **5432** + `sslmode=require`)
+   - `GCP_DATABASE_URL_POOL`, `GCP_DATABASE_URL_DIRECT` — same host for DDL scripts
+   - `REDIS_URL` (optional — enables Redis line in `/health/db`)
    - `CORS_ORIGINS` → JSON array containing your Vercel URL, e.g.
      `["https://norad.vercel.app"]`
    - `ENVIRONMENT=production`, `DEBUG=false`
 5. Deploy. Railway assigns a `*.up.railway.app` URL — that's your API base.
-
-### Optional: arq worker as a second Railway service
-
-Background jobs (web discovery runs, research runs) need the arq worker. Add a
-second service in the same Railway project:
-
-- Same repo, root dir `apps/api`
-- Override start command: `arq app.workers.settings.WorkerSettings`
-- Share the same env vars (use Railway's "shared variables")
 
 ---
 
@@ -81,12 +69,10 @@ second service in the same Railway project:
 
 ## Database schema
 
-The schema lives in Supabase and is managed manually (no Alembic — see
-`replit.md`). For a fresh Supabase project, replay the existing DDL by
-connecting via `psql "$SUPABASE_DATABASE_URL_pool"` and creating these
-tables: `runs`, `cards`, `companies`, `signals`, `sources`, `engine_calls`,
-`run_events`, `app_kv`. Models in `apps/api/app/models/`
-are the source of truth for column shapes.
+Database is **Cloud SQL Postgres** in GCP (`norad-498414`, `europe-west2`, instance `norad-pg-prod`).
+Schema is applied manually — see
+[`scripts/gcp-migration/README.md`](../scripts/gcp-migration/README.md) and
+`apps/api/sql/` for incremental DDL.
 
 ---
 

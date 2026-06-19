@@ -27,10 +27,10 @@ Every vendor call writes one row via `log_X_call(...)`. Full request + response 
 ## DB schema workflow — no Alembic
 
 Models in `apps/api/app/models/` are the source of truth.
-DDL is applied **directly to Supabase** via versioned files in `apps/api/sql/NNNN_<name>.sql`:
+DDL is applied **directly to Cloud SQL** via versioned files in `apps/api/sql/NNNN_<name>.sql`:
 
 ```bash
-psql "$SUPABASE_DATABASE_URL_pool" -f apps/api/sql/0001_*.sql
+psql "$GCP_DATABASE_URL_POOL" -f apps/api/sql/0001_*.sql
 ```
 
 When a model gains a check constraint or column, write the matching SQL file and apply it in the same commit.

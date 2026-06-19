@@ -10,12 +10,12 @@ norad/
 │   ├── api/             FastAPI backend (Python 3.11, port 8000)
 │   └── web/             React + Vite + TypeScript + Tailwind (port 5000)
 ├── docs/
-│   ├── strategy/        Blueprint, plan, stack, cost research, discovery questions
-│   ├── architecture/    BAT Azure architecture + NORAD trend-flow diagrams
+│   ├── strategy/        Blueprint, plan, stack, cost research
+│   ├── architecture/    BAT Azure architecture
+│   ├── phase-1/         Product specs and test plans
 │   ├── research/        Research-query templates (Parallel + Exa)
 │   └── reports/         Client-deliverable .docx + .xlsx reports
-├── scripts/             One-off generators (cost sheet, report DOCX builders)
-└── attached_assets/     User uploads referenced by docs/scripts
+└── scripts/             One-off generators + GCP migration helpers
 ```
 
 ## Running locally

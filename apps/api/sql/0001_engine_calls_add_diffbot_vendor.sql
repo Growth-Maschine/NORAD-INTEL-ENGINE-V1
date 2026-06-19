@@ -2,7 +2,7 @@
 --
 -- The schema is managed directly against Supabase (no Alembic). Apply with:
 --
---     psql "$SUPABASE_DATABASE_URL_pool" -f apps/api/sql/0001_engine_calls_add_diffbot_vendor.sql
+--     psql "$GCP_DATABASE_URL_POOL" -f apps/api/sql/0001_engine_calls_add_diffbot_vendor.sql
 --
 -- Postgres can't ALTER a CHECK constraint in place; we DROP + re-ADD it.
 -- Wrapped in a transaction so an interrupted apply doesn't leave the table

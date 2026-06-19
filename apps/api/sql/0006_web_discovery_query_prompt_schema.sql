@@ -1,7 +1,7 @@
 -- 0006 — add system prompt + output schema controls for web_discovery_queries.
 --
 -- Apply with:
---   psql "$SUPABASE_DATABASE_URL_pool" -f apps/api/sql/0006_web_discovery_query_prompt_schema.sql
+--   psql "$GCP_DATABASE_URL_POOL" -f apps/api/sql/0006_web_discovery_query_prompt_schema.sql
 
 BEGIN;
 

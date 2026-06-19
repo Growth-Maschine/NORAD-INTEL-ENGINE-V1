@@ -1,7 +1,7 @@
 -- 0005 — extend web_discovery_queries with Exa dashboard-like controls.
 --
 -- Apply with:
---   psql "$SUPABASE_DATABASE_URL_pool" -f apps/api/sql/0005_web_discovery_query_exa_controls.sql
+--   psql "$GCP_DATABASE_URL_POOL" -f apps/api/sql/0005_web_discovery_query_exa_controls.sql
 
 BEGIN;
 

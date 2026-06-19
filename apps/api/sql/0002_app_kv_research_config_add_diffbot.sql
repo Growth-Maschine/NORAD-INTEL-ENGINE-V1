@@ -8,7 +8,7 @@
 --
 -- Apply with:
 --
---     psql "$SUPABASE_DATABASE_URL_pool" -f apps/api/sql/0002_app_kv_research_config_add_diffbot.sql
+--     psql "$GCP_DATABASE_URL_POOL" -f apps/api/sql/0002_app_kv_research_config_add_diffbot.sql
 
 BEGIN;
 
