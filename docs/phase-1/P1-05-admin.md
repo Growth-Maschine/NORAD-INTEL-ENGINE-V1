@@ -4,8 +4,9 @@
 |-------|-------|
 | **Document ref** | P1-05-Admin |
 | **Title** | UI Screen Mapping — Admin Console |
-| **Version** | 1.0 |
-| **Last updated** | 2026-06-09 |
+| **Version** | 2.0 |
+| **Last updated** | 2026-06-19 |
+| **Controlling doc** | [P1-00 Overview](./phase-1-overview.md) |
 | **Audience** | Internal developers, operators |
 | **Linear** | [GRO-270](https://linear.app/growthmaschine/issue/GRO-270/50-map-existing-ui-screens-to-product-data-objects) · Parent [GRO-265](https://linear.app/growthmaschine/issue/GRO-265) |
 | **Workflow reference** | [P1-01-Admin](./P1-01-admin.md) |
@@ -17,7 +18,7 @@
 
 ## 1. Introduction
 
-Maps every **operator console screen** to product objects and actions. Workflow narrative: [P1-01-Admin](./P1-01-admin.md). Field spec: [P1-04](./P1-04-admin.md) Part I. Schema diagrams: [P1-04 §9](./P1-04-admin.md#9-database-schema-diagrams).
+Maps every **operator screen** in the single NORAD app to product objects and actions. Workflow narrative: [P1-01-Admin](./P1-01-admin.md). Field spec: [P1-04](./P1-04-admin.md) Part I.
 
 ---
 
@@ -118,8 +119,8 @@ Maps every **operator console screen** to product objects and actions. Workflow 
 
 ### 3.5 Query results (`.../queries/:queryId/results`)
 
-| Purpose | Browse Search Results from a completed run |
-|---------|---------------------------------------------|
+| Purpose | Browse enriched Web Discovery results from a completed run |
+|---------|-----------------------------------------------------------|
 
 **Objects**
 
@@ -127,16 +128,25 @@ Maps every **operator console screen** to product objects and actions. Workflow 
 |--------|---------|
 | Run | `runs` |
 | Search Result | `runs.engine_outputs` JSON |
+| Article | `articles` — hydrated onto each result |
 
 | Control | Action type | Effect |
 | --------- | ------------- | -------- |
-| Result row expand | Read | Title, URL, Exa summary |
-| OPEN URL | Navigate | External link |
-| **Escalate to research** | **Escalate** | Spawns Deep Research Run |
-| Dismiss result | Dismiss | Hide from view |
-| Save / bookmark | — | — |
+| Run selector | Filter | Historical runs for this query |
+| Filter / Sort | Filter | Client-side title / URL / summary |
+| Result card — title, URL | Read / Navigate | Headline, domain, date, relevance |
+| **Analyzed** badge | Read | Sonnet enrich succeeded |
+| **Previously ingested** badge | Read | Duplicate URL — summary from existing article |
+| Executive summary | Read | Sonnet paragraph |
+| Companies in this story | Read | `mentioned_companies` list |
+| **Deep research** (per company) | **Research** | `POST /api/research/runs` → `/runs/:id` |
+| Full article | Read | Collapsible `body_text` |
+| Source excerpts (Exa) | Read | Fallback when no executive summary |
+| Run again / Edit query | Navigate | Returns to query editor |
 
-**Workflow:** [P1-01-Admin §2.8](./P1-01-admin.md) · [P1-01-Admin §5](./P1-01-admin.md)
+**Not implemented:** Dismiss result, Save/bookmark on result row. Article dismiss API exists without UI.
+
+**Workflow:** [P1-01-Admin §2.6](./P1-01-admin.md) · [P1-01-User §2](./P1-01-user.md)
 
 ---
 
@@ -171,7 +181,7 @@ Maps every **operator console screen** to product objects and actions. Workflow 
 | Search / filter | Filter | List subset |
 | Review status pill | Read | draft / accepted / rejected |
 
-Shared with analyst app — same `companies` + `cards` tables.
+Shared with analyst journey — same `companies` + `cards` tables on `/companies`.
 
 ---
 
@@ -202,7 +212,7 @@ Shared with analyst app — same `companies` + `cards` tables.
 
 | Control | Action type | Effect | Backend |
 |---------|-------------|--------|---------|
-| Postgres / Redis status | Read | Health check | `GET /health/db` |
+| Postgres / Redis status | Read | Health check — Redis optional | `GET /health/db` |
 | Parallel processor / timeout | Configure | Research tuning | `app_kv.research_config` |
 | Exa search type / results | Configure | Research tuning | same |
 | Diffbot toggle / threshold | Configure | Research tuning | same |
@@ -212,14 +222,13 @@ Shared with analyst app — same `companies` + `cards` tables.
 
 ---
 
-## 4. Escalation actions (operator)
+## 4. User actions (operator)
 
 | Action | Screen | Input | Effect |
 | -------- | -------- | ------- | -------- |
 | Run query / Run all | Cluster detail | Query | Run |
-| Escalate search result | Query results | Search Result | Deep Research Run |
+| Deep research | Query results | Company from article | Deep Research Run |
 | Cancel run | Run log | Deep Research Run | Run stopped |
-| + ADD company (analyst) | — | — | Operator does not use analyst escalations |
 
 ---
 
@@ -230,7 +239,8 @@ Shared with analyst app — same `companies` + `cards` tables.
 | Cluster | Cluster list, cluster detail |
 | Query | Cluster detail, query editor |
 | Run | Query results, run log |
-| Search Result | Query results (JSON) |
+| Search Result | Query results (JSON + hydration) |
+| Article | Query results card content |
 | Deep Research Run | Run log, company detail (provenance) |
 | Company | Companies, company detail |
 | Company Card | Company detail |
@@ -239,7 +249,7 @@ Shared with analyst app — same `companies` + `cards` tables.
 | Run Event | Run log |
 | Engine Call | Run log, settings health |
 | Research Config | Settings |
-| Result Escalation | Query results|
+| Deep research trigger | Query results |
 
 ---
 
@@ -262,7 +272,7 @@ flowchart TB
     WDC --> QED
     QED --> RES
     QED -->|Run| RUN
-    RES -.->|Escalate| RUN
+    RES -.->|Deep research| RUN
     RUN --> COD
     CO --> COD
     WD --> CO
@@ -285,5 +295,5 @@ flowchart TB
 
 | Role | Name | Date |
 | ------ | ------ | ------ |
-| Author | Huzaifa | 2026-06-09 |
+| Author | Huzaifa | 2026-06-19 |
 | Reviewer | Shehrayar Haq | — |

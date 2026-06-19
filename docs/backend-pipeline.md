@@ -15,7 +15,7 @@ and how to inspect end-to-end traces.
 
 | Pipeline | Entry point | Service / router | Avg cost / run |
 |----------|-------------|------------------|----------------|
-| **Web Discovery** | `POST /api/web-discovery/clusters/{id}/run` or query run endpoints | `app/routers/web_discovery.py` | ~$0.01–0.10 per query (Exa only) |
+| **Web Discovery** | `POST /api/web-discovery/clusters/{id}/runs` | `app/services/web_discovery.py` | ~$0.05–0.50 per query (Exa + Sonnet enrich) |
 | **Research** | `POST /api/research/runs` | `app/services/research.py` | $2.80–$3.10 |
 
 Both write to the same `runs`, `run_events`, and `engine_calls` tables; `source_kind`
@@ -25,23 +25,27 @@ Both write to the same `runs`, `run_events`, and `engine_calls` tables; `source_
 
 ## 2. Web Discovery pipeline (operator)
 
-Goal: run saved Exa searches from a **Discovery Cluster** and return **Search Results**
-for operator review (and optional escalate into deep research).
+Goal: run saved Exa searches from a **Cluster**, consolidate hits into **`articles`**
+(full original content), then **Sonnet-enrich** each new article with an executive
+summary and companies mentioned in that story.
 
 ```
-Per Discovery Query in the run:
-  Exa search (query.search_query + query config)   ~$0.005–0.05 per query
-  Optional Exa /contents (per query flags)         varies
+Per Query in the run:
+  Exa search (+ contents per query flags)              ~$0.005–0.05 per query
+  Dedup vs articles.url
+  Consolidate → articles row (body_text + metadata)
+  Sonnet enrich → articles.summary + mentioned_companies   ~$0.01–0.03 per article
 ```
 
-**Models:** Exa only at run time — no NORAD LLM post-run step yet (planned).
+**Models:** Exa for search/contents; Claude Sonnet for per-article analysis.
 
-**Outputs:** `runs.engine_outputs` — one slice per `query_id`, each with a `results[]`
-array of Search Result objects (URL, title, snippet, Exa summary/highlights).
+**Outputs:**
+- `articles` — durable analyst feed (url, body_text, summary, mentioned_companies)
+- `runs.engine_outputs` — per-query Exa audit trail + ingest status per hit
 
 **Where to debug:**
-- `engine_calls WHERE run_id=… AND vendor='exa'`
-- `runs.engine_outputs` JSON for serialized hits
+- `engine_calls WHERE run_id=… AND vendor IN ('exa','anthropic')`
+- `SELECT * FROM articles WHERE query_run_id=…`
 - `apps/api/logs/pipeline.jsonl | jq 'select(.pipeline=="web_discovery" and .run_id=="…")'`
 
 ---

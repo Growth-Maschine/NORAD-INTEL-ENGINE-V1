@@ -4,24 +4,28 @@
 |-------|-------|
 | **Document ref** | P1-01-Admin |
 | **Title** | Core Operator Workflow — Admin Console |
-| **Version** | 2.5 |
-| **Last updated** | 2026-06-08 |
+| **Version** | 3.0 |
+| **Last updated** | 2026-06-19 |
+| **Controlling doc** | [P1-00 Overview](./phase-1-overview.md) |
+| **Paired doc** | [P1-01-User](./P1-01-user.md) — same app, analyst reading journey |
 
 ---
 
 ## 1. Introduction
 
-The **NORAD Intel Engine Admin Console** (`apps/web`) is where operators configure search scope and run pipelines. The backend (`apps/api`) executes all search and research work.
+The **NORAD Intel Engine** (`apps/web` + `apps/api`) is a **single application**. This document describes the **operator workflow**: configuring scope, running pipelines, and monitoring output.
 
-**Primary workflow (P1-01):** `Cluster → Query → Run → Result → AI Analysis → Signal / Escalation`. Route: `/discover-web` (sidebar label: Web Discovery).
+**Paired document:** [P1-01-User](./P1-01-user.md) describes the same screens from the **analyst reading journey** (results → Deep research → company profile). Terminology below is shared between both documents.
 
-**Deep research workflow:** Triggered from cluster **Escalate** or analyst actions on the user frontend — documented in §3 (includes Companies page objects).
+**Primary workflow (P1-01):** `Cluster → Query → Run → Article ingest → Sonnet enrich → Results → Deep research (per company)`.
 
-**Supporting admin workflow:** Settings (§7) configures research engines.
+Route: `/discover-web` (sidebar: **Web Discovery**).
+
+**Deep research workflow:** Triggered via **Deep research** on a company mentioned in a Web Discovery result, or manually from Companies. Documented in §3.
+
+**Supporting workflow:** Settings (§7) configures **deep research** engines only.
 
 Each workflow section uses the same format: component table → flow line → short explanation → complete pipeline diagram at the end.
-
-**Additional fields (v2.4):** Each workflow subsection may also include **What the operator is trying to do**, an **Action type** column in the component table, and a **Failure states** block before the section divider. Summary error tables (§2.11, §3.8) are unchanged.
 
 | Block | Purpose |
 |-------|---------|
@@ -31,19 +35,31 @@ Each workflow section uses the same format: component table → flow line → sh
 | **Failure states** | What the operator sees and what the system does when something goes wrong |
 | **Diagram** | Complete pipeline map *(end of each workflow)* |
 
-**Action types:** `Read` · `Navigate` · `Configure` · `Run` · `Monitor` · `Escalate` · `Cancel` · `Dismiss` · `Filter` · `—`
+**Action types:** `Read` · `Navigate` · `Configure` · `Run` · `Monitor` · `Research` · `Cancel` · `Dismiss` · `Filter` · `—`
 
 ### 1.1 Definitions used in this document
 
-**AI analyzes results** means any LLM step inside a pipeline that grades, ranks, extracts, synthesizes, or interprets data — not only a separate post-run analysis button. If Claude or another LLM runs during the pipeline, that counts as AI analysis.
+**AI analyzes results** means any LLM step inside a pipeline that grades, ranks, extracts, synthesizes, or interprets data — not only a separate post-run analysis button.
 
 | Term | Meaning in this codebase |
 |------|--------------------------|
-| **Save** | User explicitly bookmarks or saves a result for later. Distinct from automatic persistence (DB writes the pipeline already does). |
-| **Dismiss** | User or system removes a result from the active review queue. Distinct from **Detach/Clear** (UI-only; backend keeps running) and **Archive** (Activity panel label for a finished log — not delete). |
-| **Escalate** | User promotes a result into the next pipeline (e.g. article → deep research, or result → pending review on user frontend). |
+| **Save** | User explicitly bookmarks a result. Distinct from automatic persistence (pipelines write to DB by design). **Not implemented** on Web Discovery results UI today. |
+| **Dismiss** | Remove an article from the active feed (`POST /api/web-discovery/articles/:id/dismiss`). **API only** — no UI button yet. |
+| **Deep research** | Full Company Card pipeline (`POST /api/research/runs`) for a named company. Replaces the old “Escalate article → research” wording. |
+| **Enrich** | Per-article Sonnet step in Web Discovery: executive summary + `mentioned_companies` on `articles`. |
 
-See §5 for save, dismiss, and escalate status per pipeline.
+See §5 for disposition matrix.
+
+### 1.2 Section pairing (Admin ↔ User)
+
+| Topic | This doc (Admin) | [P1-01-User](./P1-01-user.md) |
+|-------|------------------|-------------------------------|
+| Web Discovery | §2 — configure clusters, run queries | §2 — read enriched results |
+| Deep research | §3 — trigger, monitor, cancel | §3 — watch run log, open profile |
+| Companies | §3.3–3.5 | §4 |
+| Settings | §7 — engine configuration | §6 — status + config (same screen) |
+| Dashboard | §8 | §5 |
+| Phase 2 (not built) | — | §7 |
 
 ---
 
@@ -56,12 +72,11 @@ See §5 for save, dismiss, and escalate status per pipeline.
 | **Route** | `/discover-web` |
 | **Sidebar** | Web Discovery |
 | **Pipeline** | Cluster runs (`source_kind = web_discovery`) |
-| **Backend** | `routers/web_discovery.py` → `_execute_web_discovery_run` |
+| **Backend** | `routers/web_discovery.py` → `services/web_discovery.py` (`safe_execute_web_discovery_run`) |
 | **Flow start** | Operator creates or opens a cluster |
-| **Flow end** | Operator reviews Exa results on the query results page |
-| **Flow end** | Operator completes AI analysis and escalates / saves / dismisses results |
+| **Flow end** | Operator reviews Sonnet-enriched results; optional Deep research per company |
 
-Operators define themed search clusters, add Exa queries, run one query or all active queries in a cluster, and review ranked web results.
+Operators define themed search clusters, add Exa queries, run one query or all active queries in a cluster, and review enriched article cards (summary, companies, full text).
 
 ---
 
@@ -104,7 +119,9 @@ The operator names the cluster and sets scope tags (include/exclude keywords, ge
 
 `Cluster command center` → `+ Add Query (click)` → `Query form (fill + save)`
 
-Each query is an Exa search definition. The form pre-fills search text from the cluster keywords. LLM fields (`system_prompt`, `output_schema`) can be saved but are **not executed** at run time.
+Each query is an Exa search definition. The form pre-fills search text from the cluster keywords.
+
+**Query LLM fields** (`system_prompt`, `output_schema`) are persisted on `web_discovery_queries` but **are not executed** at run time. Article enrichment uses a fixed Sonnet tool in `web_discovery.py` (executive summary + mentioned companies).
 
 **Failure states:**
 
@@ -133,7 +150,7 @@ Each query is an Exa search definition. The form pre-fills search text from the 
 
 `Cluster command center` → `Run All Cluster Queries (click + confirm)` → `Results tab (monitor)`
 
-Both paths create a `runs` row with `source_kind = web_discovery`. Maximum 5 concurrent web discovery runs system-wide.
+Both paths create a `runs` row with `source_kind = web_discovery`. Maximum **5** concurrent web discovery runs system-wide. Execution is **in-process** (`asyncio.create_task` in the API) — no separate worker process.
 
 ---
 
@@ -149,9 +166,15 @@ Both paths create a `runs` row with `source_kind = web_discovery`. Maximum 5 con
 
 **Flow:**
 
-`Run started` → `Activity log (watch)` → `Run completed toast`
+`Run started` → `Activity log (watch Exa + enrich events)` → `Run completed toast` → auto-navigate to results (single-query path)
 
-For each active query the backend calls Exa search with the query's content settings, logs to `engine_calls`, and appends results to `runs.engine_outputs`.
+For each active query the backend:
+
+1. Calls Exa search (+ contents per query flags) → `engine_calls`
+2. Dedupes against `articles.url`
+3. Inserts new rows into `articles` with `body_text`
+4. Runs Claude Sonnet enrich per new article (up to 4 concurrent) → `articles.summary`, `articles.mentioned_companies`
+5. Appends enriched hits to `runs.engine_outputs`
 
 **Failure states:**
 
@@ -159,65 +182,71 @@ For each active query the backend calls Exa search with the query's content sett
 |-----------|------------------------|----------------------|
 | Cluster paused | Toast error (HTTP 400) | Run not started |
 | No active queries | Toast error (HTTP 400) | Run not started |
-| 5 concurrent web discovery runs | Toast error (HTTP 429) | Run queued/rejected until slot free |
-
-**Failure states:**
-
-| Condition | What the operator sees | What the system does |
-|-----------|------------------------|----------------------|
+| 5 concurrent web discovery runs | Toast error (HTTP 429) | Run rejected until slot free |
 | Exa error on one query (batch) | Warning in activity log | Other queries in batch continue |
 | Pipeline crash | `failed` status; error on results page | Run stops; partial `engine_outputs` may exist |
 | Empty results | Completed run with zero sources | Operator adjusts query scope and re-runs |
+| Sonnet enrich fails (one article) | Card without executive summary | Run continues; `enriched: false` on hit |
 
 ---
 
 ### 2.6 View results
 
-**What the operator is trying to do:** Review Exa hits, compare runs, and decide whether to re-run or edit the query.
+**What the operator is trying to do:** Read NORAD analysis per source, compare runs, and start Deep research on companies mentioned in a story.
 
 | Component | Action | Action type | Backend |
 |-----------|--------|-------------|---------|
-| **View Query Results** / auto-navigate | Open after run | Navigate | `GET /api/web-discovery/queries/:id/results?run_id=` |
-| **Run selector** | Pick a past run | Filter | Loads historical result slice |
-| **Filter / Sort** | Client-side | Filter | Filters title, URL, summary |
-| **Run again** | Click → confirm | Run | Returns to query editor to re-run |
-| **Edit query** | Click | Navigate | Navigates to query editor |
+| **Results page** | Open after run or from query list | Navigate | `GET /api/web-discovery/queries/:id/results?run_id=` |
+| **Run selector** | Pick a past run | Filter | Loads historical slice; hydrates from `articles` table |
+| **Filter / Sort** | Client-side | Filter | Title, URL, summary text |
+| **Executive summary** | Read | Read | `articles.summary` (Sonnet) |
+| **Companies in this story** | Read list | Read | `articles.mentioned_companies` |
+| **Deep research** | Click per company | Research | `POST /api/research/runs` → navigate to `/runs/:id` |
+| **Full article** | Expand collapsible | Read | `articles.body_text` (cleaned for display) |
+| **Source excerpts (Exa)** | Read | Read | Shown only when no executive summary exists |
+| **Run again** | Click → confirm | Run | Returns to query editor |
+| **Edit query** | Click | Navigate | Query editor |
 
 **Flow:**
 
-`Run complete` → `Results page` → `Review sources (expand/filter)` → optional `Run again`
+`Run complete` → `Results page` → `Read summary + companies` → optional `Deep research` on a company
 
-Each result shows URL, title, snippet, Exa score, and optional highlights/summary/text from Exa content modes.
+**Content modes:** If neither highlights nor full text is enabled on the query, cards may show a warning (“Limited content…”) and thin `body_text`. Enable **Highlights** or **Full text** on the query and re-run.
 
 **Failure states:**
 
 | Condition | What the operator sees | What the system does |
 |-----------|------------------------|----------------------|
-| Escalate / Save / Dismiss | No buttons on results page | operator reviews Exa hits only |
-| Post-run NORAD LLM analysis | Exa vendor summaries only | see §2.7 |
+| Enrich failed for one article | “Analyzed” badge may be missing; no summary block | Hit still in results; Exa data retained; `enriched: false` |
+| Duplicate URL | “Previously ingested” badge | Skips re-enrich; summary loaded from existing `articles` row |
+| Expecting Save / Dismiss buttons | Not on UI | See §5 — API dismiss exists; save not built |
 
 ---
 
-### 2.7 AI analysis and result disposition
+### 2.7 AI analysis (Web Discovery enrich)
 
-**What the operator is trying to do:** Understand what AI runs on cluster results and which save / dismiss / escalate actions are available.
+**What the operator is trying to do:** Understand what AI runs automatically on each new article during a Web Discovery run.
 
-| Step | LLM in pipeline? | User action? | Detail |
-|------|------------------|--------------|--------|
-| AI analyzes results | Exa vendor summaries only | — | Run executor calls Exa. Query LLM fields are stored for a post-run step. |
-| User reviews signals | — | — | Signal extraction from web results |
-| Save result | — | — | Results persist in `runs.engine_outputs`; bookmark UI on results page |
-| Dismiss result | — | — | Hide result from operator view |
-| Escalate result | — | — | Escalate to research or analyst review |
+| Step | LLM? | When | Detail |
+|------|------|------|--------|
+| Exa search | No | Per query | Vendor search + optional contents |
+| Article enrich | **Yes — Claude Sonnet** | Per **new** article (not duplicates) | Tool `analyze_article`: executive summary + companies with role/context |
+| Query `system_prompt` / `output_schema` | No | — | Stored only; not executed |
+| User Deep research | Yes — full pipeline | On button click | Separate `research` run (§3) |
 
-**Current step:** operator reviews Exa results on the results page. See §4–§5 for the full LLM and disposition matrix.
+**Persisted:**
+
+| Field | Table |
+|-------|-------|
+| `summary`, `mentioned_companies`, `body_text` | `articles` |
+| Per-hit enrich fields + `article_id`, `ingest_status`, `enriched` | `runs.engine_outputs` |
 
 **Failure states:**
 
 | Condition | What the operator sees | What the system does |
 |-----------|------------------------|----------------------|
-| Expecting NORAD LLM on results | Exa summaries only | Post-run LLM |
-| Expecting save / dismiss / escalate | No buttons on results page | Results persist in `engine_outputs`; disposition on results page |
+| Sonnet timeout / error | Card without executive summary; may fall back to Exa excerpts | `enriched: false`; run still completes |
+| Empty body (no highlights/text) | Limited-content warning | Enrich may produce thin or empty summary |
 
 ---
 
@@ -225,7 +254,7 @@ Each result shows URL, title, snippet, Exa score, and optional highlights/summar
 
 **Flow:**
 
-`Sidebar → Web Discovery` → `Create Cluster` → `Add Query` → `Run Query or Run All` → `Monitor activity` → `View Results` → `AI analysis → escalate / save / dismiss`
+`Sidebar → Web Discovery` → `Create Cluster` → `Add Query` → `Run Query or Run All` → `Monitor activity` → `View Results` → `Read enrich` → optional `Deep research` on a company
 
 This is the primary P1-01 operator path on the admin console.
 
@@ -248,22 +277,25 @@ flowchart TD
 
     RUN1 --> EXA[Exa search per query]
     RUNALL --> EXA
-    EXA --> ENGINE[Log engine_calls · write engine_outputs]
+    EXA --> DEDUP[Dedup vs articles.url]
+    DEDUP --> ART[Insert articles.body_text]
+    ART --> ENRICH[Sonnet enrich per new article]
+    ENRICH --> ENGINE[engine_calls + engine_outputs]
     ENGINE --> DONE[Run completed]
 
     DONE --> RESULTS[View Results page]
     RESULTS --> HIST{Review old run?}
     HIST -->|Yes| SELECTOR[Run selector]
-    HIST -->|No| REVIEW[Review current results]
+    HIST -->|No| REVIEW[Read summary + companies]
     SELECTOR --> REVIEW
 
-    REVIEW --> RERUN{Run again?}
+    REVIEW --> DR{Deep research?}
+    DR -->|Yes| RESEARCH[POST /api/research/runs]
+    DR -->|No| RERUN{Run again?}
+    RESEARCH --> RUNLOG[Run log · /runs/:id]
+    RUNLOG --> COMP[Companies / company profile]
     RERUN -->|Yes| ADD
-    RERUN -->|No| AI[AI analysis]
-    AI --> SIGNAL[Review signals]
-    SIGNAL --> DISPO[Escalate / save / dismiss]
-    DISPO --> END([Workflow complete])
-    RERUN -->|Stop here| END2([End — result review only])
+    RERUN -->|No| END([Workflow complete])
 ```
 
 ---
@@ -301,40 +333,38 @@ flowchart TD
 
 | Attribute | Value |
 |-----------|-------|
-| **Entry (admin)** | **Escalate** on cluster search result (§2.7) |
-| **Entry (admin, monitor)** | `/companies`, `/companies/:id`, `/runs/:id` |
-| **Entry (analyst)** | **+ ADD** on News article, **Find & queue** manual bookmark — [P1-01-User](./P1-01-user.md) |
+| **Entry (Web Discovery)** | **Deep research** on a company in results (§2.6) |
+| **Entry (monitor)** | `/companies`, `/companies/:id`, `/runs/:id` |
+| **Entry (API)** | `POST /api/research/runs` with `{ company_name, domain_hint? }` |
 | **Pipeline** | Deep research (`source_kind = research`) |
 | **Backend** | `services/research.py` |
 | **Output** | `CompanyCardV1` in `companies`, `cards`, `signals`, `sources` |
 
-Deep research builds a structured company profile from web evidence. On the admin console the entry path is cluster **Escalate**; the Companies page is where operators monitor runs and read completed profiles.
+Deep research builds a structured company profile from web evidence. The primary entry from Web Discovery is **Deep research** on a `mentioned_companies` row; the Companies page is where operators monitor runs and read completed profiles.
 
 ---
 
-### 3.2 Start research from cluster result
+### 3.2 Start research from Web Discovery result
 
-**What the operator is trying to do:** Escalate a promising Exa hit from cluster results into a full company profile run.
+**What the operator is trying to do:** Run the full Company Card pipeline for a company named in an enriched article.
 
 | Component | Action | Action type | Backend |
 |-----------|--------|-------------|---------|
-| **Escalate** button on search result | Click | Escalate | Opens confirmation modal |
-| **Start research** | Confirm in modal | Escalate | `POST /api/research/runs` with `{ company_name, domain?, source_run_id, result_url }` |
-| Post-confirm navigation | Auto or **Go now** | Navigate | Navigates to `/companies` |
+| **Deep research** button (per company) | Click | Research | `POST /api/research/runs` with `{ company_name, domain_hint? }` |
+| Post-start navigation | Auto | Navigate | `/runs/:run_id` (live Activity feed) |
 
 **Flow:**
 
-`Web Discovery → Results page → Escalate (click) → Start research (confirm) → Companies page`
+`Web Discovery → Results page → Companies in this story → Deep research (click)` → `Run log page`
 
- Deep research is triggered from the analyst frontend or via API.
+There is **no** article-level **Escalate** button on the results page. Research is company-scoped.
 
 **Failure states:**
 
 | Condition | What the operator sees | What the system does |
 |-----------|------------------------|----------------------|
-| Escalate pending | No button on results page | Operator uses analyst +ADD or API |
 | 5 concurrent research runs | Toast error (HTTP 429) | Run rejected until slot free |
-| Research already running for company | Existing row shows **Profiling…** | New run may queue or coalesce per API rules |
+| Research already running for company | Activity shows in-flight run | New run allowed per API admission rules |
 
 ---
 
@@ -381,7 +411,7 @@ On load: `GET /api/research/feed`. Live rows poll every 3 s; completed rows ever
 | Condition | What the operator sees | What the system does |
 |-----------|------------------------|----------------------|
 | Run cancelled | Row shows `cancelled` | No card saved from that run |
-| Run failed | Row shows `failed` | No card saved — operator may re-escalate from cluster results |
+| Run failed | Row shows `failed` | No card saved — operator may start Deep research again from Web Discovery results |
 | Card excerpt loading | Spinner on expand | Lazy-load via `GET /api/research/companies/:id` |
 
 ---
@@ -436,17 +466,16 @@ On load: `GET /api/research/feed`. Live rows poll every 3 s; completed rows ever
 
 ```mermaid
 flowchart TD
-    START([Escalate from Web Discovery]) --> CONFIRM[Confirm Start research]
-    CONFIRM --> API[POST /api/research/runs]
-    API --> S1[Stage 1 · Build input + source context]
+    START([Deep research from Web Discovery]) --> API[POST /api/research/runs]
+    API --> RUNLOG[Run log · /runs/:id · SSE Activity]
+    RUNLOG --> S1[Stage 1 · Build input]
     S1 --> S2[Stage 2 · Parallel + Exa + Diffbot fan-out]
-    S2 --> S3[Stage 3 · Claude Sonnet synthesize CompanyCardV1 + signals]
+    S2 --> S3[Stage 3 · Claude Sonnet · CompanyCardV1]
     S3 --> S4[Stage 4 · Persist company / card / signals / sources]
     S4 --> DONE[Run completed]
 
-    DONE --> NAV[Navigate to Companies]
-    NAV --> MONITOR[Activity panel + expand row]
-    MONITOR --> DETAIL[Open full company page]
+    DONE --> COMP[Companies feed · expand row]
+    COMP --> DETAIL[Company profile · /companies/:id]
     DETAIL --> END([Review profile])
 ```
 
@@ -473,9 +502,9 @@ Any row below counts as **AI analyzes results** per §1.1.
 
 | Pipeline | Stage | LLM | What it does | Persisted to |
 |----------|-------|-----|--------------|--------------|
-| Cluster runs | Post-run | — | Exa vendor summaries | `runs.engine_outputs` |
-| Cluster runs | Post-run | Claude | Rank, summarise, extract signals from Exa hits | `runs.engine_outputs` or child rows |
-| Deep Research | 3 — Synthesize | Claude Sonnet 4.5 | Full Company Card + signal extraction | `cards.card`, `signals` |
+| Web Discovery | Per new article | Claude Sonnet | Executive summary + mentioned companies | `articles`, `runs.engine_outputs` |
+| Web Discovery | Search | — | Exa search + contents | `engine_calls`, `articles.body_text` |
+| Deep Research | 3 — Synthesize | Claude Sonnet | Full Company Card + signal extraction | `cards.card`, `signals` |
 
 ### 4.1 AI failure and fallback behaviour
 
@@ -494,12 +523,13 @@ When an LLM or AI step fails, the pipeline may **skip**, **fall back to other en
 
 Activity panel events for research fallbacks include: `sources_backfilled`, `signals_harvested`, `parallel_fields_promoted`, `diffbot_fields_promoted`, `synthesis_retry`, `synthesis_retry_done`, `synthesis_coerce_recovered`.
 
-#### Cluster runs
+#### Web Discovery
 
 | Step | If step fails | Fallback behaviour |
 |------|--------------|-------------------|
 | Exa search (per query in batch) | Exa error on one query | Warning in activity log; **other queries continue** |
-| Post-run LLM analysis | — | Exa vendor summaries until post-run LLM |
+| Article insert | Duplicate URL | Skip insert; hydrate summary from existing `articles` row |
+| Sonnet enrich (per article) | Timeout / API error | Article row kept; `enriched: false`; run continues |
 
 ---
 
@@ -507,20 +537,20 @@ Activity panel events for research fallbacks include: `sources_backfilled`, `sig
 
 Automatic persistence (pipeline writes to DB) is **not** the same as a user **Save** action.
 
-| Action | Cluster runs | Deep Research |
-|--------|--------------|---------------|
-| **Auto-persist results** | Yes — `runs.engine_outputs` | Yes — `companies`, `cards`, `signals`, `sources` |
-| **User Save / bookmark** | — |
-| **User Dismiss** | — |
-| **LLM dismissing results** | — | No |
-| **User Escalate** | Results page → research (§3.2) | N/A (escalation destination) |
-| **Archive (Activity label)** | Label on finished log | Label on finished log — not delete or dismiss |
+| Action | Web Discovery | Deep Research |
+|--------|---------------|---------------|
+| **Auto-persist** | Yes — `articles` + `runs.engine_outputs` | Yes — `companies`, `cards`, `signals`, `sources` |
+| **User Save / bookmark** | **Not implemented** (UI) | N/A |
+| **User Dismiss** | **API only** (`POST …/articles/:id/dismiss`) — no UI | N/A |
+| **Deep research** | Per-company button on results page | N/A (this pipeline) |
+| **Archive (Activity label)** | Label on finished run log | Label on finished run log — not delete |
 
 **Summary**
 
-- **Saved by user:** Bookmark on admin results page. Pipelines auto-persist results.
-- **Dismissed:** On cluster results page.
-- **Escalated:** Path — cluster **Escalate** → deep research (§3.2). Analyst escalate (+ADD, manual bookmark) is documented in [P1-01-User](./P1-01-user.md).
+- **Enriched automatically:** Every new article gets Sonnet summary + companies during the run.
+- **Deep research:** Operator-triggered per company from results (§3.2).
+- **Dismiss:** Backend endpoint exists; UI not wired.
+- **Save:** Not built.
 
 ---
 
@@ -530,22 +560,22 @@ This section records deliverable coverage for the core workflow specification.
 
 ### 6.1 Primary user outcome
 
-Operators configure web search scope (clusters and queries), execute Exa searches, review results to identify market signal, and escalate promising hits into deep research.
+Operators configure web search scope (clusters and queries), execute Exa searches with automatic Sonnet enrichment, review executive summaries and mentioned companies, and start Deep research on selected companies.
 
 ### 6.2 Required flow coverage
 
-| Required step | Cluster runs | Deep Research |
-|---------------|--------------|---------------|
-| Login | Single-user | Same |
-| Create cluster | — | — |
-| Add queries | — | — |
-| Run query or cluster | — | — |
-| View results | Results page | Company Card page |
-| AI analyzes results | Exa + post-run LLM | Sonnet synthesis + signals |
-| Review signals | Results page | Signals on company page |
-| User save | — |
-| User dismiss | Results page | — |
-| Escalate | Result → research | Escalation destination |
+| Required step | Web Discovery | Deep Research |
+|---------------|---------------|---------------|
+| Login | Single-user (no auth UI) | Same |
+| Create cluster | ✓ | — |
+| Add queries | ✓ | — |
+| Run query or cluster | ✓ | — |
+| View results | Enriched results page | Company Card page |
+| AI analyzes results | Sonnet per article (enrich) | Sonnet synthesis + signals |
+| Review companies in story | Results page | Signals on company page |
+| User save | **Not built** | — |
+| User dismiss | **API only** | — |
+| Deep research | Per company on results | This pipeline |
 
 ### 6.3 Screens involved
 
@@ -565,7 +595,7 @@ Operators configure web search scope (clusters and queries), execute Exa searche
 |----------|--------|
 | Can users run a single query, or only a full cluster? | **Both** on Web Discovery. |
 | Can results be saved, dismissed, or escalated? | See §5. |
-| What is AI analysis? | Any in-pipeline LLM step (§4). Cluster post-run LLM and Deep Research uses Sonnet. |
+| What is AI analysis? | Web Discovery: Sonnet enrich per article. Research: Sonnet Company Card synthesis (§4). |
 | What happens when a run fails? | Toast + error; `runs.status = failed`; operator can re-run. |
 | What happens when AI analysis fails? | See §4.1. **Research:** engine partial-failure tolerated; deterministic backfill + optional Claude retry-on-thin signals; hard validation failure fails the run. |
 
@@ -579,8 +609,8 @@ Operators configure web search scope (clusters and queries), execute Exa searche
 | Settings workflow |
 | LLM inventory (AI analysis definition) |
 | Save / dismiss / escalate — actual behaviour |
-| User frontend perspective |
-| Admin doc approved |
+| User frontend perspective | Paired with [P1-01-User](./P1-01-user.md) |
+| Admin doc approved | v3.0 — 2026-06-19 |
 
 ---
 
@@ -602,8 +632,8 @@ Operators configure web search scope (clusters and queries), execute Exa searche
 
 | Component | Action | Action type | Backend |
 |-----------|--------|-------------|---------|
-| **Postgres (Supabase)** status | Read | Read | `GET /health/db` |
-| **Redis (Upstash)** status | Read | Read | Same health check |
+| **Postgres (GCP Cloud SQL)** status | Read | Read | `GET /health/db` |
+| **Redis** status | Read | Read | Same health check (optional if `REDIS_URL` unset) |
 
 ---
 
@@ -650,7 +680,7 @@ Changes apply to the **next** research run, not runs already in flight. In produ
 
 | Screen | Route |
 | -------- | ------- |
-| Dashboard | `/` |
+| Dashboard | `/` | Health tile + CTA to Web Discovery; run feed placeholder |
 
 ---
 
@@ -658,5 +688,5 @@ Changes apply to the **next** research run, not runs already in flight. In produ
 
 | Role | Name | Date |
 | ------ | ------ | ------ |
-| Author | Huzaifa | 2026-06-08 |
+| Author | Huzaifa | 2026-06-19 |
 | Reviewer | Shehrayar Haq | — |

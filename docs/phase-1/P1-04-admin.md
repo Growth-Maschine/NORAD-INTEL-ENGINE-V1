@@ -4,9 +4,10 @@
 |-------|-------|
 | **Document ref** | P1-04 |
 | **Title** | Required Fields per Object |
-| **Version** | 2.2 |
-| **Last updated** | 2026-06-16 |
+| **Version** | 3.0 |
+| **Last updated** | 2026-06-19 |
 | **Audience** | Internal developers, operators |
+| **Controlling doc** | [P1-00 Overview](./phase-1-overview.md) |
 | **Linear** | [GRO-269](https://linear.app/growthmaschine/issue/GRO-269/40-define-required-fields-for-each-core-object) · Parent [GRO-265](https://linear.app/growthmaschine/issue/GRO-265) |
 | **Object reference** | [P1-02-Admin](./P1-02-admin.md) · [P1-02-User](./P1-02-user.md) · [P1-03](./P1-03.md) |
 | **Screen mapping** | [P1-05-Admin](./P1-05-admin.md) · [P1-05-User](./P1-05-user.md) |
@@ -16,13 +17,13 @@
 
 ## 1. Introduction
 
-Single field-level spec for the NORAD data model. Companion to [P1-03](./P1-03.md) (relationships). Analyst **screen labels** and workflows live in [P1-02-User](./P1-02-user.md) and [P1-01-User](./P1-01-user.md) — not duplicated here.
+Single field-level spec for the NORAD data model. Companion to [P1-03](./P1-03.md) (relationships). Analyst **screen labels** live in [P1-02-User](./P1-02-user.md) and [P1-01-User](./P1-01-user.md) — not duplicated here.
 
 | Part | Sections | Content |
 |------|----------|---------|
 | **I — Field tables** | §2–§8 | Postgres columns, enums, FKs, field definitions |
 | **II — Schema diagrams** | §9 | Master ER, flows, `runs` polymorphism |
-| **III — Analyst consumption** | §10 | Read-only role — no duplicate field tables |
+| **III — Analyst consumption** | §10 | Same schema, analyst UI labels — no duplicate field tables |
 
 **Global conventions**
 
@@ -35,7 +36,7 @@ Single field-level spec for the NORAD data model. Companion to [P1-03](./P1-03.m
 
 **Cluster · Query · Run**
 
-One pipeline. **Admin UI** creates and edits Clusters and Queries. **Runs** execute on operator action now; **scheduled cron** will auto-run active clusters and ingest results into the analyst News feed. **Analysts read and monitor** — they do not create clusters or queries.
+One pipeline. **Web Discovery** UI (`/discover-web`) creates and edits Clusters and Queries. **Runs** execute on operator action (in-process — no separate worker). Each run **ingests new URLs into `articles`** and runs **Sonnet enrich** in the same pipeline. Analysts read enriched results on the **query results page** in the same app — they do not create clusters or queries. Scheduled cron and News feed are **Phase 2**.
 
 | Level | Product name | Postgres table / row |
 |-------|--------------|----------------------|
@@ -96,7 +97,7 @@ No table in MVP. Documented for post-MVP schema design.
 
 ## 3. Cluster, Query, and Run
 
-Configured in **admin UI** only. Postgres table names below; product terms are Cluster / Query / Run.
+Configured on `/discover-web`. Postgres table names below; product terms are Cluster / Query / Run.
 
 ### 3.1 Cluster
 
@@ -217,11 +218,12 @@ Table: `runs` where `source_kind = web_discovery` · executes one or more Querie
 | image | string (URL) | No | No | Results thumbnail ||
 | favicon | string (URL) | No | No | Results row | |
 | author | string | No | No | Results metadata | |
-| relevance_score | integer | No | Yes | Results sort ||
-| relevance_reason | text | No | No | Results expand ||
-| extracted_signals | JSON array | No | Yes | Results signals column ||
-| source_run_id | UUID | Yes | No | Internal | Parent run · when promoted to row |
-| source_query_id | UUID | Yes | No | Internal | Parent query |
+| article_id | UUID | No | No | Internal | FK → `articles.id` when ingested |
+| ingest_status | string | No | Yes | Results badges | `created` · `duplicate` |
+| executive_summary | text | No | Yes | Results card | Sonnet summary — hydrated from `articles.summary` |
+| mentioned_companies | JSON array | No | Yes | Companies in this story | Hydrated from `articles` |
+| enriched | boolean | No | Yes | **Analyzed** badge | `true` when Sonnet enrich succeeded |
+| source_query_id | UUID | No | No | Internal | Parent query (on Article row) |
 
 ### 3.5 Article
 
@@ -230,33 +232,35 @@ Table: `articles`
 | Field | Type | Required | Searchable | UI | Notes |
 |-------|------|----------|------------|-----|-------|
 | id | UUID | Yes | No | Internal | PK |
-| url | text | Yes | Yes | Analyst News row | Unique |
-| title | string | Yes | Yes | News row headline | |
-| summary | text | No | Yes | Expanded article | AI or excerpt |
-| body_text | text | No | Yes | Expanded article | |
-| source_name | string | No | Yes | News row | Publisher |
-| published_at | timestamptz | No | Yes | News row date | |
-| ingested_at | timestamptz | Yes | No | Internal | When ingest job added the story |
-| cluster_id | UUID | No | No | Internal | FK → `web_discovery_clusters.id` — which cluster surfaced it |
+| url | text | Yes | Yes | Results card link | Unique |
+| title | string | Yes | Yes | Results card title | |
+| summary | text | No | Yes | Executive summary | Sonnet enrich output |
+| body_text | text | No | Yes | Full article section | Cleaned for display |
+| source_name | string | No | Yes | Results metadata | Publisher |
+| published_at | timestamptz | No | Yes | Results metadata | |
+| ingested_at | timestamptz | Yes | No | Internal | When Web Discovery run ingested URL |
+| cluster_id | UUID | No | No | Internal | FK → `web_discovery_clusters.id` |
 | query_run_id | UUID | No | No | Internal | FK → `runs.id` — originating Run |
-| category_tag | string | No | Yes | News row tag | e.g. MED-NIC |
-| priority_score | integer | No | Yes | News row sort | 0–100 |
-| mentioned_companies | JSON array | No | Yes | Companies in story | |
-| status | enum (`active`, `dismissed`, `archived`) | Yes | No | Internal | |
+| source_query_id | UUID | No | No | Internal | FK → `web_discovery_queries.id` |
+| category_tag | string | No | No | Internal | Reserved — Phase 2 feed tagging |
+| priority_score | integer | No | No | Internal | Reserved — Phase 2 feed scoring |
+| mentioned_companies | JSON array | No | Yes | Companies in this story | Sonnet entity extraction |
+| source_metadata | JSON object | Yes | No | Internal | Exa hit metadata snapshot |
+| status | enum (`active`, `dismissed`, `archived`) | Yes | No | Internal | `dismiss` API exists; no UI |
 | created_at | timestamptz | Yes | No | Internal | |
 | updated_at | timestamptz | Yes | No | Internal | |
 
-### 3.6 News Signal
+### 3.6 News Signal *(Phase 2 — not migrated)*
 
-Table: `article_signals`
+Table: `article_signals` — **not in current repo**. Documented for `phase2test.md` acceptance and future News / Signals feed.
 
 | Field | Type | Required | Searchable | UI | Notes |
 |-------|------|----------|------------|-----|-------|
 | id | UUID | Yes | No | Internal | PK |
 | article_id | UUID | Yes | No | Internal | FK → `articles.id` |
-| signal_type | string | Yes | Yes | Analyst Signals tabs | FUND, FDA, LEGAL, … |
-| score | integer | No | Yes | News row priority | 0–100 |
-| headline | text | No | Yes | Signals table | |
+| signal_type | string | Yes | Yes | Signals tabs (planned) | FUND, FDA, LEGAL, … |
+| score | integer | No | Yes | Feed priority (planned) | 0–100 |
+| headline | text | No | Yes | Signals table (planned) | |
 | created_at | timestamptz | Yes | No | Internal | |
 
 ---
@@ -289,8 +293,8 @@ Table: `runs` where `source_kind = research`
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
-| source_search_result_url | string | No | Escalate from Search Result ·|
-| source_run_id | UUID | No | Parent Run ·|
+| source_search_result_url | string | No | Deep research from result card |
+| source_run_id | UUID | No | Parent Run |
 
 ### 4.2 Company
 
@@ -309,7 +313,7 @@ Table: `companies`
 | status | string(32) | No | Yes | Companies list ||
 | headquarters_country | string(64) | No | Yes | Company detail | |
 | canonical_card_id | UUID | No | No | Internal | Composite FK with `id` |
-| is_watchlisted | boolean | No | Yes | Watchlist tab filter ||
+| is_watchlisted | boolean | No | No | Internal | **Phase 2** — not on `companies` model yet |
 | created_at | timestamptz | Yes | Yes | Company metadata | |
 | updated_at | timestamptz | Yes | No | Internal | |
 
@@ -332,7 +336,7 @@ Table: `cards` · JSON contract: `CompanyCardV1` in `apps/api/app/schemas/`
 | score_partnership_fit | integer | No | Yes | Internal | |
 | score_strategic_fit | integer | No | Yes | Internal | |
 | score_risk | integer | No | Yes | Internal | |
-| review_status | enum (`draft`, `accepted`, `rejected`, `archived`) | Yes | Yes | Pending review queue | `draft` = in analyst queue |
+| review_status | enum (`draft`, `accepted`, `rejected`, `archived`) | Yes | Yes | Companies list pill | `draft` default — Pending Review UI is Phase 2 |
 | reviewer_notes | text | No | No | Internal | |
 | created_at | timestamptz | Yes | Yes | Profile history | |
 | updated_at | timestamptz | Yes | No | Internal | |
@@ -453,13 +457,12 @@ All run types share `runs` columns (§3.3, §4.1). Discriminator: `source_kind`.
 
 ## 7. AI Analysis — fields on parent objects
 
-Not a table. Post-pipeline LLM output columns:
+Not a table. LLM output columns:
 
 | Parent | Field | Type | Required | UI |
 | -------- | ------- | ------ | ---------- | ----- |
-| Search Result | relevance_score | integer | No | Results sort |
-| Search Result | relevance_reason | text | No | Results expand |
-| Search Result | extracted_signals | JSON array | No | Results signals |
+| Article | summary | text | No | Executive summary on results card |
+| Article | mentioned_companies | JSON array | No | Companies in this story |
 | Company Card | card (synthesis) | JSONB | Yes | Company detail |
 | `engine_calls` | (audit row) | — | — | Research Evidence |
 
@@ -467,16 +470,16 @@ Not a table. Post-pipeline LLM output columns:
 
 ## 8. Non-table objects (actions and views)
 
-### 8.1 Result escalation
+### 8.1 Deep research trigger
 
-**No table.** Admin action on a Search Result from a Run.
+**No table.** User action from a Web Discovery result card (company in `mentioned_companies`).
 
 | Concept | Persisted as | Notes |
 |---------|--------------|-------|
-| Escalate click | New `runs` row `source_kind=research` ||
-| Source URL / company hint | `runs.query` + engines metadata | |
+| Deep research click | New `runs` row `source_kind=research` | `POST /api/research/runs` |
+| Company name / domain hint | `runs.query` + engines metadata | |
 
-### 8.2 Pending Review Item *(analyst queue — documented for shared backend)*
+### 8.2 Pending Review Item *(Phase 2 — view, not a table)*
 
 **View** — not a table. Row appears when `cards.review_status = draft`.
 
@@ -754,11 +757,12 @@ flowchart TB
     SLICE --> SR
     SR --> ITEM
 
-    ITEM -.->|Escalate| RUNS2[(runs source_kind=research)]
-    RUNS -.->|ingest| ART[articles]
+    ITEM -.->|Deep research| RUNS2[(runs source_kind=research)]
+    RUNS -->|ingest + enrich| ART[articles]
+    ART -.->|hydrate| ITEM
 ```
 
-Search Results are **not rows** — JSON inside `engine_outputs`. **Articles** are ingested from Run output for the analyst News feed.
+Search Results are **not rows** — JSON inside `engine_outputs`. **Articles** are created during the same Web Discovery run (dedup + Sonnet enrich). Results API hydrates Article fields onto each hit.
 
 #### Deep Research (shared)
 
@@ -781,11 +785,26 @@ flowchart TB
     RUNS --> EV
     RUNS --> EC
 
-    CARD -->|review_status=draft| PR[[Pending Review VIEW]]
-    PR -->|Promote| WL[watchlist_entries]
+    CARD -->|review_status=draft| PR[[Pending Review VIEW · Phase 2]]
+    PR -->|Promote · Phase 2| WL[watchlist · Phase 2]
 ```
 
-#### Analyst News feed
+#### Analyst results (built today)
+
+```mermaid
+flowchart TB
+    RUNS[(Run · web_discovery)]
+    ART[articles]
+    CARD[Result card · UI view]
+
+    RUNS -->|ingest + enrich| ART
+    ART -->|hydrate| CARD
+    CARD -->|Deep research| DRR[(runs · research)]
+```
+
+Users read **result cards** on the query results route — not a separate News feed. `GET /api/web-discovery/articles` exists for article listing; primary analyst surface is query results.
+
+#### Analyst News feed *(Phase 2 — not built)*
 
 ```mermaid
 flowchart TB
@@ -806,7 +825,7 @@ flowchart TB
     ART -.-> OPP
 ```
 
-Analysts **do not** create Clusters or Queries — they read **Articles** produced by scheduled or manual Runs.
+Analysts **do not** create Clusters or Queries. **Phase 2:** scheduled runs would feed a News / Signals surface — not built today.
 
 #### Views and non-tables
 
@@ -838,7 +857,7 @@ flowchart LR
 | Pending Review | `cards.review_status = 'draft'` joined to `companies` |
 | Watchlist | `companies.is_watchlisted` or `watchlist_entries` |
 | Opportunity | Weekly query over `articles` + `signals` + `monitoring_rules` |
-| Operator result escalate | `INSERT INTO runs (source_kind='research', engines→provenance)` |
+| Operator deep research trigger | `INSERT INTO runs (source_kind='research', engines→provenance)` |
 
 ### 9.5 `runs` polymorphism
 
@@ -861,8 +880,8 @@ flowchart TD
 
 | `source_kind` | Trigger | Output |
 |---------------|---------|--------|
-| `web_discovery` | Admin Run Query / Run All · cron | Search Results JSON · Articles ingest |
-| `research` | Escalate / +ADD / bookmark / API | Company + Card |
+| `web_discovery` | Run Query / Run All | Search Results JSON · `articles` ingest + enrich |
+| `research` | Deep research / API | Company + Card |
 | `user_query` | Same as `research` | Company + Card |
 
 ### 9.6 Composite foreign keys
@@ -912,23 +931,16 @@ erDiagram
 
 ```mermaid
 flowchart LR
-    subgraph Admin["Admin UI"]
+    subgraph App["Single app"]
         direction TB
         A1[Cluster + Query config]
-        A2[Run Exa / cron]
-        A3[Search Results]
-        A4[Escalate]
+        A2[Run Exa]
+        A3[Result cards]
+        A4[Deep research]
+        B1[Companies feed]
     end
 
-    subgraph Analyst["Analyst UI — read & act"]
-        direction TB
-        B1[News / Articles]
-        B2[+ ADD]
-        B3[Pending Review]
-        B4[Watchlist]
-    end
-
-    subgraph DB["Shared Postgres"]
+    subgraph DB["Postgres"]
         direction TB
         R[(runs)]
         ART[(articles)]
@@ -937,36 +949,33 @@ flowchart LR
     end
 
     A1 --> A2 --> R
-    R --> A3
-    R -.->|ingest| ART
-    ART --> B1
+    R --> ART
+    ART --> A3
     A3 --> A4 --> R
     A4 --> C
-    B1 --> B2 --> R
     R --> K
-    K --> B3
-    B3 --> B4 --> C
+    K --> B1
 ```
 
 ---
 
-## Part III — Analyst app (read-only)
+## Part III — Analyst journey (same schema)
 
-Analysts **read and monitor** — they do **not** create Clusters, Queries, or Runs. Admin configures clusters; **cron** or manual runs execute Exa and ingest **Articles** (§3.5) into the News feed.
+Analysts use the **same app and Postgres schema**. They read enriched Web Discovery results and company profiles — they do not configure clusters or queries.
 
 | Need | Where to look |
 |------|----------------|
 | Postgres columns | **Part I** (this doc) — single schema |
 | Screen labels & analyst actions | [P1-02-User](./P1-02-user.md) |
-| Workflows (+ADD, Promote, Pending Review) | [P1-01-User](./P1-01-user.md) |
+| Workflows | [P1-01-User](./P1-01-user.md) |
 | Screen → object mapping | [P1-05-User](./P1-05-user.md) |
 
-| Object | Analyst role |
-|--------|----------------|
-| Cluster, Query, Run | Not managed in analyst UI |
-| Article, News Signal | Read News / Signals feeds |
-| Company, Company Card, Company Signal | Read profiles; Pending Review actions |
-| Pending Review Item | View — `cards.review_status = draft` (§8.2) |
+| Object | Analyst role (built today) |
+|--------|---------------------------|
+| Cluster, Query, Run | Not configured in analyst journey — operator routes |
+| Article, result card | Read on query results page |
+| Company, Company Profile, Company Signal | Read on `/companies` |
+| Pending Review, Watchlist, News Signal | **Phase 2** — see §8.2, §3.6 |
 
 ---
 
@@ -976,12 +985,13 @@ Analysts **read and monitor** — they do **not** create Clusters, Queries, or R
 | ------ |
 | Part I — field table for every P1-02-Admin object |
 | Part I — Cluster / Query / Run single definition (§3) |
-| Part I — Article + News Signal (§3.5–3.6) |
+| Part I — Article enrich fields (§3.4–3.5) |
+| Part I — News Signal marked Phase 2 (§3.6) |
 | Part II — database schema diagrams (§9) |
-| No duplicate analyst field tables |
-| Analyst read-only consumption noted (§10) |
+| Single-app analyst consumption (§10) |
 | CompanyCardV1 JSON deferred to `apps/api/app/schemas/` |
 | `organization_id` omitted per MVP decision |
+| `phase2test.md` — treat `article_signals` / Today as Phase 2 or retired |
 
 ---
 
@@ -989,5 +999,5 @@ Analysts **read and monitor** — they do **not** create Clusters, Queries, or R
 
 | Role | Name | Date |
 | ------ | ------ | ------ |
-| Author | Huzaifa | 2026-06-16 |
+| Author | Huzaifa | 2026-06-19 |
 | Reviewer | Shehrayar Haq | — |
