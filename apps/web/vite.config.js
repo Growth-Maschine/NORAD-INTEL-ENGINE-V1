@@ -16,7 +16,7 @@ export default defineConfig({
         allowedHosts: true,
         proxy: {
             // Backend routers already include `/api` in their prefix (e.g.
-            // `/api/discovery/*`, `/api/events/*`). Pass through unchanged.
+            // `/api/web-discovery/*`, `/api/research/*`, `/api/events/*`, etc.
             // Health routes live at root (`/health`) — frontend code that needs
             // them prefixes manually.
             "/api": {

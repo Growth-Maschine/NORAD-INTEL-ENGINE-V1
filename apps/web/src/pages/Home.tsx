@@ -3,8 +3,8 @@ import { Link } from "react-router-dom";
 import {
   ArrowUpRight,
   Building2,
-  Compass,
   Activity,
+  Globe2,
   TrendingUp,
 } from "lucide-react";
 
@@ -52,14 +52,14 @@ export default function Home() {
               </p>
             </div>
             <Link
-              to="/discover"
+              to="/discover-web"
               className={cn(
                 "group inline-flex w-full shrink-0 items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2.5",
                 "text-sm font-semibold text-white shadow-sm ring-1 ring-accent/20 transition hover:bg-accent/90 hover:shadow md:w-auto",
               )}
             >
-              <Compass className="h-4 w-4" />
-              Start Discovery
+              <Globe2 className="h-4 w-4" />
+              Open Clusters
               <ArrowUpRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
             </Link>
           </div>
@@ -102,10 +102,10 @@ export default function Home() {
           </div>
           <div className="rounded-xl border border-dashed border-border bg-gradient-to-b from-white to-tint/20 px-6 py-14 text-center">
             <div className="mx-auto grid h-10 w-10 place-items-center rounded-lg border border-border bg-white shadow-soft">
-              <Compass className="h-4 w-4 text-soft" />
+              <Globe2 className="h-4 w-4 text-soft" />
             </div>
             <p className="mt-3 text-sm text-muted">
-              No runs yet. Hit <span className="font-semibold text-ink">Start Discovery</span> to build your first Company Card.
+              No runs yet. Open <span className="font-semibold text-ink">Web Discovery</span> to run your first cluster query.
             </p>
           </div>
         </section>

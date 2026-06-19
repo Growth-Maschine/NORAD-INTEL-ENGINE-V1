@@ -13,7 +13,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { Topbar } from "@/components/layout/Topbar";
-import { RunFeed } from "@/components/discover/RunFeed";
+import { RunFeed } from "@/components/runs/RunFeed";
 import { Card } from "@/components/ui/Card";
 import { ConfirmDialog } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -100,7 +100,7 @@ export default function Companies() {
         title="Companies"
         subtitle={
           rows.length === 0
-            ? "Click Profile on a Today card to start your first research run."
+            ? "Start a Profile research run from Companies or Web Discovery."
             : `${rows.length} profile${rows.length === 1 ? "" : "s"} · ${rows.filter((r) => r.is_live).length} running`
         }
       />
@@ -116,7 +116,7 @@ export default function Companies() {
           <EmptyState
             icon={Building2}
             title="No profiles yet"
-            description="Click 'Profile' on any extracted company in the Today feed to start your first research run. It'll show up here, live."
+            description="Run Profile on a company from Web Discovery results or add one manually. Completed runs show up here."
           />
         )}
 
@@ -127,7 +127,6 @@ export default function Companies() {
               <RunFeed
                 runId={focusedRunId}
                 historical={!focusedIsLive}
-                pipeline="research"
               />
             </aside>
 

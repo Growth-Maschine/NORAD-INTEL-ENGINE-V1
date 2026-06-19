@@ -10,7 +10,7 @@ import {
   XCircle,
 } from "lucide-react";
 
-import { RunFeed } from "@/components/discover/RunFeed";
+import { RunFeed } from "@/components/runs/RunFeed";
 import { Topbar } from "@/components/layout/Topbar";
 import { Card, CardBody } from "@/components/ui/Card";
 import { PageBody } from "@/components/ui/PageBody";
@@ -65,7 +65,7 @@ export default function Run() {
           </div>
 
           <aside className="lg:sticky lg:top-6 lg:h-[calc(100vh-7rem)]">
-            <RunFeed runId={id ?? null} pipeline="research" />
+            <RunFeed runId={id ?? null} />
           </aside>
         </section>
       </PageBody>
