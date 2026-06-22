@@ -334,26 +334,6 @@ function humanize(
     return { headline: sanitize(ev.message) };
   }
 
-  if (k === "synthesis_retry") {
-    const sigs = num(meta.signals_returned);
-    return {
-      headline: "Profile draft was thin — expanding signals",
-      sub: sigs != null ? `Only ${sigs} signal${sigs === 1 ? "" : "s"} on first pass` : undefined,
-    };
-  }
-
-  if (k === "synthesis_retry_done") {
-    const sigs = num(meta.signals_final);
-    const srcs = num(meta.sources_final);
-    return {
-      headline: "Expansion pass complete",
-      sub:
-        sigs != null && srcs != null
-          ? `${sigs} signal${sigs === 1 ? "" : "s"} · ${srcs} source${srcs === 1 ? "" : "s"}`
-          : undefined,
-    };
-  }
-
   return { headline: sanitize(ev.message) || "Event" };
 }
 

@@ -445,8 +445,43 @@ export interface CardOut {
   score_partnership_fit: number | null;
   score_strategic_fit: number | null;
   score_risk: number | null;
+  profile_completeness_pct: number | null;
+  profile_verified_count: number | null;
+  profile_uncertain_count: number | null;
+  profile_missing_count: number | null;
   card: Record<string, any>;
   created_at: string;
+}
+
+export interface ProfileCompletenessParam {
+  param_key: string;
+  group_name: string;
+  sort_order: number;
+  label: string;
+  value: unknown;
+  confidence: string;
+  basis: string | null;
+  source_refs: number[];
+  coverage_status: string;
+}
+
+export interface ProfileCompletenessGroup {
+  group_name: string;
+  verified_count: number;
+  uncertain_count: number;
+  missing_count: number;
+  parameters: ProfileCompletenessParam[];
+}
+
+export interface ProfileCompletenessOut {
+  card_id: string;
+  company_id: string;
+  completeness_pct: number;
+  verified_count: number;
+  uncertain_count: number;
+  missing_count: number;
+  total_count: number;
+  groups: ProfileCompletenessGroup[];
 }
 
 export interface CompanyOut {
@@ -464,17 +499,6 @@ export interface CompanyOut {
   created_at: string;
 }
 
-export interface SignalRow {
-  id: string;
-  type: string;
-  subtype: string | null;
-  headline: string;
-  evidence: string | null;
-  weight: number;
-  signal_date: string | null;
-  source_refs: number[];
-}
-
 export interface SourceRow {
   id: string;
   local_id: number;
@@ -490,7 +514,6 @@ export interface SourceRow {
 export interface CompanyDetail {
   company: CompanyOut;
   card: CardOut | null;
-  signals: SignalRow[];
   sources: SourceRow[];
 }
 
@@ -517,6 +540,14 @@ export const listCompanies = (limit = 50) =>
 
 export const getCompany = (id: string) =>
   api<CompanyDetail>(`/api/research/companies/${id}`);
+
+export const getCompanyProfileCompleteness = (companyId: string) =>
+  api<ProfileCompletenessOut>(
+    `/api/research/companies/${companyId}/profile-completeness`,
+  );
+
+export const getCardProfileCompleteness = (cardId: string) =>
+  api<ProfileCompletenessOut>(`/api/research/cards/${cardId}/profile-completeness`);
 
 // ── Company evidence (raw engine I/O) ────────────────────────────────────────
 

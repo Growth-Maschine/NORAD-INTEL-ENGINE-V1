@@ -21,7 +21,6 @@ import {
   type CompanyEvidence,
   type DiffbotEvidence,
   type ExaPageRow,
-  type ParallelSignal,
   type ParallelBasisField,
   type SourceRow,
 } from "@/lib/api";
@@ -494,17 +493,6 @@ function ParallelPanel({
         </section>
       )}
 
-      {b.signals && b.signals.length > 0 && (
-        <section>
-          <SectionLabel>Signals from Parallel ({b.signals.length})</SectionLabel>
-          <ul className="space-y-3">
-            {b.signals.map((sig, i) => (
-              <ParallelSignalRow key={i} signal={sig} />
-            ))}
-          </ul>
-        </section>
-      )}
-
       {b.sources && b.sources.length > 0 && (
         <section>
           <SectionLabel>Parallel sources ({b.sources.length})</SectionLabel>
@@ -764,32 +752,6 @@ function AllLinksPanel({
         </section>
       ))}
     </div>
-  );
-}
-
-function ParallelSignalRow({ signal }: { signal: ParallelSignal }) {
-  return (
-    <li className="rounded-lg border border-border bg-white px-4 py-3">
-      <div className="flex flex-wrap items-center gap-2">
-        {signal.type && (
-          <span className="rounded-md bg-tint px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
-            {signal.type}
-          </span>
-        )}
-        {signal.date && (
-          <span className="text-[10px] text-soft">{signal.date}</span>
-        )}
-        {signal.weight != null && (
-          <span className="text-[10px] tabular-nums text-soft">
-            weight {signal.weight}/10
-          </span>
-        )}
-      </div>
-      <div className="mt-1.5 text-sm font-medium text-ink">{signal.headline}</div>
-      {signal.evidence && (
-        <p className="mt-1 text-xs leading-relaxed text-muted">{signal.evidence}</p>
-      )}
-    </li>
   );
 }
 

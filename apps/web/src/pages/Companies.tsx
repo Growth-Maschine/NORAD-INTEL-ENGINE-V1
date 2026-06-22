@@ -44,7 +44,7 @@ type CompaniesTab = "profiles" | "discovered";
  * Layout: Activity log on the LEFT (matches the user's mental model — the
  * log is the *origin* of what they're looking at; the company list is the
  * result). Each row collapses to a one-liner and expands to show the engine
- * summary + top signals. The Activity panel always tracks whichever row the
+ * summary. The Activity panel always tracks whichever row the
  * user is paying attention to (the most-recently expanded one) so logs stay
  * attached to their run instead of disappearing when the run finishes.
  *
@@ -485,7 +485,7 @@ function CompanyRow({
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Expanded detail — engine summary + top signals + open page CTA
+// Expanded detail — strategic fit excerpt + open page CTA
 // ──────────────────────────────────────────────────────────────────────────
 
 function CompanyRowDetail({ row }: { row: CompanyFeedRow }) {
@@ -570,7 +570,7 @@ function CompanyRowDetail({ row }: { row: CompanyFeedRow }) {
         description={
           `"${row.company_name}" is currently profiling. Cancelling will stop ` +
           `the pipeline at the next checkpoint — engine calls already in ` +
-          `flight may still finish, but no company / card / signals will be ` +
+          `flight may still finish, but no company / card will be ` +
           `saved from this run.`
         }
         confirmText="Cancel run"
@@ -590,14 +590,11 @@ function ProfileExcerpt({
   detail: CompanyDetail;
   companyId: string;
 }) {
-  const { card, signals } = detail;
-  const c = card?.card ?? {};
+  const c = detail.card?.card ?? {};
   const fit = c.strategic_fit ?? {};
   const fitSummary: string | undefined = fit.fit_summary?.value;
-  const recAction: string | undefined = fit.recommended_next_action?.value;
-  const topSignals = signals.slice(0, 2);
 
-  if (!fitSummary && topSignals.length === 0) {
+  if (!fitSummary) {
     return (
       <Link
         to={`/companies/${companyId}`}
@@ -610,37 +607,14 @@ function ProfileExcerpt({
 
   return (
     <div className="space-y-3 text-sm">
-      {fitSummary && (
-        <div>
-          <div className="mb-1.5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-soft">
-            Strategic fit
-            {recAction && (
-              <Pill variant="accent">{recAction.replace(/_/g, " ")}</Pill>
-            )}
-          </div>
-          <p className="line-clamp-3 text-[13px] leading-relaxed text-muted">
-            {fitSummary}
-          </p>
+      <div>
+        <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-soft">
+          Strategic fit
         </div>
-      )}
-
-      {topSignals.length > 0 && (
-        <div>
-          <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-soft">
-            Top signals
-          </div>
-          <ul className="space-y-1.5">
-            {topSignals.map((s) => (
-              <li key={s.id} className="flex items-start gap-2 text-[13px]">
-                <span className="mt-0.5 shrink-0 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-emerald-700">
-                  {s.type}
-                </span>
-                <span className="line-clamp-1 text-muted">{s.headline}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+        <p className="line-clamp-3 text-[13px] leading-relaxed text-muted">
+          {fitSummary}
+        </p>
+      </div>
     </div>
   );
 }

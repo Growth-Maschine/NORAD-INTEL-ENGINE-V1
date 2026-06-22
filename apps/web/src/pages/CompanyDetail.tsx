@@ -1,5 +1,4 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { motion } from "framer-motion";
 import { useState } from "react";
 import {
   Bell,
@@ -11,10 +10,8 @@ import {
   History,
   Info,
   Loader2,
-  RadioTower,
   Share2,
   SearchX,
-  Target,
   Star,
   Users,
   X,
@@ -29,15 +26,14 @@ import { ResearchEvidence } from "@/components/company/ResearchEvidence";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/Card";
 import { ConfirmDialog } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { MetricBar } from "@/components/ui/MetricBar";
 import { PageBody } from "@/components/ui/PageBody";
 import { Pill } from "@/components/ui/Pill";
-import { ScoreBar } from "@/components/ui/ScoreBar";
 import { StrategicFitText } from "@/components/ui/StrategicFitText";
 import { HoverTip } from "@/components/ui/Tooltip";
 import {
   cancelResearchRun,
   getCompany,
+  getCompanyProfileCompleteness,
   listCompanyResearchRuns,
   type CompanyDetail,
   type ResearchRunStatus,
@@ -93,7 +89,13 @@ export default function CompanyDetailPage() {
 }
 
 function CompanyCardView({ data }: { data: CompanyDetail }) {
-  const { company, card, signals, sources } = data;
+  const { company, card, sources } = data;
+  const profileQ = useQuery({
+    queryKey: ["company", company.id, "profile-completeness"],
+    queryFn: () => getCompanyProfileCompleteness(company.id),
+    enabled: !!company.canonical_card_id,
+    refetchInterval: 30000,
+  });
   const c = card?.card ?? {};
   const identity = c.company_identity ?? {};
   const classification = c.classification ?? {};
@@ -108,8 +110,6 @@ function CompanyCardView({ data }: { data: CompanyDetail }) {
     typeof identity.description === "string" ? identity.description : undefined;
 
   const fitSummary: string | undefined = fit.fit_summary?.value;
-  const recAction: string | undefined = fit.recommended_next_action?.value;
-  const recRationale: string | undefined = fit.recommended_action_rationale?.value;
 
   const sc = c.sources_and_confidence ?? {};
   const overallConfidence: string | undefined = sc.overall_confidence;
@@ -122,15 +122,6 @@ function CompanyCardView({ data }: { data: CompanyDetail }) {
     .map((w) => w[0])
     .join("")
     .toUpperCase();
-
-  const fitTone =
-    recAction?.startsWith("outreach")
-      ? "Strong Fit"
-      : recAction === "monitor"
-        ? "Monitor"
-        : recAction === "pass"
-          ? "Pass"
-          : "Reviewing";
 
   // Grouped fact panels — replaces the old uniform 3×3 cell grid. Each group
   // gets an icon + section label; numeric facts (money) get emphasized type so
@@ -199,15 +190,6 @@ function CompanyCardView({ data }: { data: CompanyDetail }) {
     { k: "Stage", v: funding.last_round_type },
   ];
 
-  const breakdown = [
-    { label: "Strategic Fit", value: card?.score_strategic_fit, accent: "navy" as const },
-    { label: "Growth Momentum", value: card?.score_momentum, accent: "emerald" as const },
-    { label: "Fundraising Signal", value: card?.score_fundraising, accent: "amber" as const },
-    { label: "Acquisition Signal", value: card?.score_acquisition, accent: "amber" as const },
-    { label: "Partnership Fit", value: card?.score_partnership_fit, accent: "accent" as const },
-    { label: "Risk", value: card?.score_risk, accent: "emerald" as const },
-  ];
-
   const domain = company.domain ?? identity.domain ?? null;
 
   return (
@@ -244,7 +226,6 @@ function CompanyCardView({ data }: { data: CompanyDetail }) {
                   {funding.last_round_type && (
                     <Pill variant="navy">{funding.last_round_type}</Pill>
                   )}
-                  <Pill variant="accent">{fitTone}</Pill>
                   {overallConfidence && (
                     <HoverTip
                       label={
@@ -381,9 +362,7 @@ function CompanyCardView({ data }: { data: CompanyDetail }) {
               </CardBody>
             </Card>
 
-            {/* Strategic Fit narrative — just the summary; the recommended
-                action + rationale moved to the right-rail CTA card so we're
-                not saying the same thing twice. */}
+            {/* Strategic Fit narrative */}
             {fitSummary && (
               <Card>
                 <CardHeader>
@@ -407,67 +386,6 @@ function CompanyCardView({ data }: { data: CompanyDetail }) {
             )}
 
             <CompanyBriefSections card={c} />
-
-            {/* Signals */}
-            <div>
-              <div className="mb-3 flex items-baseline justify-between">
-                <h2 className="text-base font-semibold text-ink">
-                  Signals
-                </h2>
-                <span className="text-xs text-muted">
-                  {signals.length} on record
-                </span>
-              </div>
-
-              {signals.length === 0 ? (
-                <EmptyState
-                  icon={RadioTower}
-                  title="No structured signals on this card"
-                  description={
-                    sources.length === 0
-                      ? "The deep research run completed but didn't surface specific growth, funding, or momentum signals strong enough to record. The narrative above still draws on the underlying research — re-run for a fresh synthesis if you need cited evidence."
-                      : "The deep research run cited sources but Claude didn't extract discrete signals on this pass. Re-run to retry the synthesis."
-                  }
-                />
-              ) : (
-                <Card>
-                  <div className="divide-y divide-border">
-                    {signals.map((s) => (
-                      <article key={s.id} className="p-5">
-                        <div className="flex items-start gap-5">
-                          <div className="w-20 shrink-0">
-                            <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-soft">
-                              {s.signal_date ?? "—"}
-                            </div>
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="mb-2 flex items-center gap-3">
-                              <Pill variant="neutral">{s.type}</Pill>
-                              <span className="text-[11px] font-semibold text-emerald-600">
-                                weight {s.weight}/10
-                              </span>
-                            </div>
-                            <h3 className="text-sm font-semibold text-ink">
-                              {s.headline}
-                            </h3>
-                            {s.evidence && (
-                              <p className="mt-1.5 text-[13px] leading-relaxed text-muted">
-                                {s.evidence}
-                              </p>
-                            )}
-                            {s.source_refs.length > 0 && (
-                              <p className="mt-1.5 text-[11px] text-soft">
-                                sources: {s.source_refs.map((n) => `[${n}]`).join(" ")}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                </Card>
-              )}
-            </div>
 
             {/* Market & competitors quick view */}
             {(market.direct_competitors?.length ||
@@ -502,79 +420,7 @@ function CompanyCardView({ data }: { data: CompanyDetail }) {
 
           {/* Right rail */}
           <aside className="col-span-12 space-y-4 lg:col-span-4">
-            {/* Hero CTA — what GM should actually do, why. Lifted out of the
-                main column so the rail anchors on action, not duplicated
-                narrative. */}
-            {recAction && (
-              <motion.div
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.25, ease: "easeOut" }}
-              >
-                <Card className="relative overflow-hidden border-accent/30 bg-white shadow-[0_1px_0_rgba(0,0,0,0.02),0_8px_24px_-14px_rgba(255,107,53,0.22)]">
-                  <span
-                    aria-hidden
-                    className="absolute inset-y-0 left-0 w-[3px] bg-accent"
-                  />
-                  <CardBody className="space-y-3 py-5 pl-6 pr-5">
-                    <span className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-accent">
-                      Recommended action
-                    </span>
-                    <div className="text-[15px] font-semibold leading-snug text-ink">
-                      {recAction.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}
-                    </div>
-                    {recRationale && (
-                      <p className="text-[12.5px] leading-[1.6] text-muted">
-                        {recRationale}
-                      </p>
-                    )}
-                  </CardBody>
-                </Card>
-              </motion.div>
-            )}
-
-            {/* Fit Score */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Fit Score</CardTitle>
-                <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-soft">
-                  {signals.length} signals
-                </span>
-              </CardHeader>
-              <CardBody className="space-y-3">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-3xl font-semibold tracking-tight text-ink tabular-nums">
-                    {card?.score_overall ?? 0}
-                  </span>
-                  <span className="text-xs text-soft">/ 100</span>
-                </div>
-                <div
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[10.5px] font-semibold uppercase tracking-[0.06em]",
-                    (card?.score_overall ?? 0) >= 70
-                      ? "bg-emerald-50 text-emerald-700"
-                      : (card?.score_overall ?? 0) >= 40
-                        ? "bg-amber-50 text-amber-700"
-                        : "bg-tint text-soft",
-                  )}
-                >
-                  <Target className="h-3 w-3" />
-                  {(card?.score_overall ?? 0) >= 70
-                    ? "Strong Match"
-                    : (card?.score_overall ?? 0) >= 40
-                      ? "Decent Match"
-                      : "Light Match"}
-                </div>
-                <ScoreBar
-                  current={card?.score_overall ?? 0}
-                  threshold={50}
-                  max={100}
-                />
-              </CardBody>
-            </Card>
-
-            {/* Quick facts — pure identity / who-they-are. No narrative here;
-                that lives in Strategic Fit (main column) and the CTA above. */}
+            {/* Quick facts — pure identity / who-they-are. */}
             <Card>
               <CardHeader>
                 <CardTitle>Quick facts</CardTitle>
@@ -598,22 +444,6 @@ function CompanyCardView({ data }: { data: CompanyDetail }) {
               </CardBody>
             </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Metric Breakdown</CardTitle>
-              </CardHeader>
-              <CardBody className="space-y-3.5">
-                {breakdown.map((b) => (
-                  <MetricBar
-                    key={b.label}
-                    label={b.label}
-                    value={b.value ?? 0}
-                    accent={b.accent}
-                  />
-                ))}
-              </CardBody>
-            </Card>
-
             <ProfileHistory companyId={company.id} />
           </aside>
 
@@ -630,7 +460,22 @@ function CompanyCardView({ data }: { data: CompanyDetail }) {
               the primary at-a-glance read. Collapsed by default to just
               the Identity group; click "Show full audit" to expand. */}
           <div className="col-span-12">
-            <MustHaveCoverage card={c} />
+            {profileQ.isLoading ? (
+              <Card>
+                <CardBody className="flex items-center justify-center gap-2 py-10 text-sm text-soft">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading profile completeness…
+                </CardBody>
+              </Card>
+            ) : profileQ.data ? (
+              <MustHaveCoverage data={profileQ.data} />
+            ) : company.canonical_card_id ? (
+              <Card>
+                <CardBody className="py-8 text-center text-sm text-soft">
+                  Profile completeness not available for this card yet.
+                </CardBody>
+              </Card>
+            ) : null}
           </div>
         </div>
       </PageBody>
