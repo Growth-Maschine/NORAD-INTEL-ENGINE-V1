@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Resolve .env relative to this file (apps/api/app/core/config.py → apps/api/.env)
@@ -34,9 +34,12 @@ class Settings(BaseSettings):
     environment: str = Field(default="development")
     debug: bool = Field(default=True)
 
-    # Shared bearer for admin-only write routes (e.g. PUT /api/settings/*).
-    # When unset in non-debug mode the routes return 503 — fail-closed.
-    admin_token: str = Field(default="")
+    # Shared secret for internal admin routes (`X-Admin-Token` header).
+    # Env: NORAD_ADMIN_TOKEN (preferred) or ADMIN_TOKEN.
+    admin_token: str = Field(
+        default="",
+        validation_alias=AliasChoices("NORAD_ADMIN_TOKEN", "ADMIN_TOKEN"),
+    )
 
     # ── server
     host: str = "0.0.0.0"

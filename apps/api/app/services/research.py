@@ -18,7 +18,7 @@ For one chosen company, this service runs the full Company-Card synthesis:
                                        Diffbot origin URLs are eligible for
                                        `confidence="confirmed"` cites.
     Stage 4  persist                — upsert Company → insert Card → backfill
-                                       Signals + Sources → flip Run to completed,
+                                       Sources → flip Run to completed,
                                        point Company.canonical_card_id at the
                                        fresh card
 
@@ -80,9 +80,10 @@ from app.engines.logging import (
     log_parallel_call,
 )
 from app.engines.parallel_client import ParallelTaskResponse
-from app.models import Card, Company, Run, Signal, Source
+from app.models import Card, Company, Run, Source
 from app.schemas import CompanyCardV1, get_contract_schema
 from app.schemas.common import Source as SourceSchema
+from app.services.card_profile_parameters import persist_card_profile_parameters_sync
 from app.services.run_events import emit, set_pipeline
 
 logger = logging.getLogger(__name__)
@@ -303,20 +304,18 @@ async def execute_research(run_id: uuid.UUID, p: ResearchParams) -> ResearchResu
         await _update_run(factory, run_id, progress=85)
         await emit(
             run_id, "stage_completed",
-            f"Stage 3 — synthesized card ({len(card_model.signals)} signals, "
-            f"{len(card_model.sources_and_confidence.sources)} sources, "
+            f"Stage 3 — synthesized card ({len(card_model.sources_and_confidence.sources)} sources, "
             f"${claude_cost:.3f})",
             meta={
                 "stage": 3,
                 "cost": claude_cost,
-                "signal_count": len(card_model.signals),
                 "source_count": len(card_model.sources_and_confidence.sources),
             },
         )
 
         # ── Stage 4: persist ──────────────────────────────────────────────
         # Cancellation check: if the user cancelled during synthesis, bail
-        # before we create / mutate any Company / Card / Signal / Source rows.
+        # before we create / mutate any Company / Card / Source rows.
         async with factory() as s:
             _check_run = await s.get(Run, run_id)
             if _check_run is not None and _check_run.status == "cancelled":
@@ -411,7 +410,6 @@ class _ArticleContext:
 # Compact research brief Parallel emits. Kept small + flat so it fits well
 # under Parallel's 15 KB task_spec cap. Claude reads this as evidence (NOT as
 # the final contract) and reconciles it with the full CompanyCardV1 schema.
-_PARALLEL_MIN_SIGNALS = 3
 _PARALLEL_MIN_SOURCES = 3
 
 _PARALLEL_RESEARCH_SCHEMA: dict[str, Any] = {
@@ -475,46 +473,6 @@ _PARALLEL_RESEARCH_SCHEMA: dict[str, Any] = {
             "items": {"type": "string"},
         },
         "competitive_advantage": {"type": ["string", "null"]},
-        "signals": {
-            "type": "array",
-            "description": (
-                f"REQUIRED: at least {_PARALLEL_MIN_SIGNALS} items, ideally 3-8. "
-                "These are the strongest growth/funding/momentum/risk signals "
-                "for the company. Even for small / low-profile companies, you "
-                "MUST derive 3+ signals from whatever evidence exists: product "
-                "launches, founder background, hiring posts, niche category "
-                "positioning, customer review themes, social/PR mentions, "
-                "press coverage. Do not return fewer than 3 — synthesize from "
-                "available evidence. (Parallel's API rejects JSON-schema "
-                "`minItems`, so this is enforced via prompt + downstream "
-                "retry.)"
-            ),
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["type", "headline"],
-                "properties": {
-                    "type": {
-                        "type": "string",
-                        "description": "growth | funding | hiring | product | partnership | risk | strategic",
-                    },
-                    "date": {
-                        "type": ["string", "null"],
-                        "description": "YYYY-MM-DD if known.",
-                    },
-                    "headline": {"type": "string"},
-                    "evidence": {"type": ["string", "null"]},
-                    "weight": {
-                        "type": ["integer", "null"],
-                        "description": "1-10 strength of signal.",
-                    },
-                    "source_urls": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                    },
-                },
-            },
-        },
         "sources": {
             "type": "array",
             "description": "Every URL referenced above, with title + publish date if known.",
@@ -877,11 +835,11 @@ _SYNTH_SYSTEM = """You are the NORAD research synthesizer.
 Your job: produce ONE high-quality CompanyCardV1 JSON describing the target \
 company, by merging THREE evidence streams:
 
-1. PARALLEL — a COMPACT evidence brief (identity, funding, signals, sources) \
+1. PARALLEL — a COMPACT evidence brief (identity, funding, sources) \
 returned by an agentic web-research engine. This is NOT the full CompanyCardV1 \
 contract — it's pre-vetted candidate facts you must verify against Exa \
 snippets and expand into the richer card schema (products_and_skus, \
-people_and_decision_map, strategic_fit, scores, etc.).
+people_and_decision_map, strategic_fit, etc.).
 2. EXA — raw text snippets from 3-8 web pages we crawled in real time. Use \
 these to add detail, attribute sources, and override Parallel where Exa \
 disagrees clearly.
@@ -915,40 +873,34 @@ URLs (with ids) we already fetched. Build `sources_and_confidence.sources` by \
 SELECTING from that registry (keep the ids stable). You may also add Parallel-\
 cited URLs that aren't in the registry by appending new ids continuing the \
 numbering. NEVER invent a URL that isn't in the registry or in the Parallel \
-output. Use the resulting ids in Valued.sources and Signal.source_refs.
-- `signals` MUST contain AT LEAST 3 entries (target 3-8). This is non-negotiable, \
-even for tiny / under-the-radar companies. Each signal's `type` MUST be EXACTLY \
-ONE of these six enum values (no other strings — the contract will reject \
-anything else):
-    growth | fundraising | acquisition | partnership | risk | strategic
-  If you don't see obvious growth or funding signals, derive signals from what \
-IS visible and slot them into the closest enum bucket — examples:
-    * product launches or SKU expansion          → type="growth"
-    * founder background / prior exits           → type="strategic"
-    * hiring posts on LinkedIn / job boards      → type="growth"
-    * niche category positioning vs incumbents   → type="strategic"
-    * customer review themes / NPS sentiment     → type="risk"  (negative) or "growth" (positive)
-    * partnership / distribution mentions        → type="partnership"
-    * press, podcast, or social mentions         → type="growth"
-    * regulatory exposure or category headwinds  → type="risk"
-    * M&A chatter or acquihire rumors            → type="acquisition"
-    * round announcements / SAFE / crowdfund     → type="fundraising"
-  Each signal must include type (one of the six above), headline, weight 1-10, \
-and reference at least one source id. NEVER return an empty signals array — \
-that means you did not read the evidence carefully enough.
-- For `scores`: produce honest 0-100 numbers across all sub-scores. Lower is \
-fine — don't inflate.
-- For `strategic_fit`: write a NORAD/Growth-Maschine-specific take. Recommend \
-one action (outreach_partnership | outreach_investment | outreach_acquisition \
-| monitor | pass) with rationale.
+output. Use the resulting ids in Valued.sources fields.
+- For `strategic_fit`: write a NORAD/Growth-Maschine-specific `fit_summary` \
+only — do NOT emit scores or recommended actions (monitor/pass/outreach); \
+those are handled outside this API.
 - If something is genuinely unknown, leave `value: null` and \
 `confidence: "unknown"`. Honest > wrong.
 - Do not invent URLs. Do not invent person names, funding amounts, \
 investors, or revenue numbers.
 """
 
-_SYNTH_MIN_SIGNALS = 3
 _SYNTH_MIN_SOURCES = 3
+
+
+def _strip_bd_synthesis_output(tool_input: dict[str, Any]) -> dict[str, Any]:
+    """Drop signals/scores/recommendations — future frontend owns the BD layer."""
+    tool_input["signals"] = []
+    tool_input["scores"] = {}
+    sf = tool_input.get("strategic_fit")
+    if isinstance(sf, dict):
+        for key in ("recommended_next_action", "recommended_action_rationale"):
+            sf[key] = {
+                "value": None,
+                "confidence": "unknown",
+                "basis": None,
+                "sources": [],
+            }
+        tool_input["strategic_fit"] = sf
+    return tool_input
 
 
 # ── Candidate-source registry ────────────────────────────────────────────────
@@ -1743,16 +1695,6 @@ def _dedupe_claude_source_ids(
         else:
             seen_ids.add(sid)
 
-    if id_remap:
-        for sig in tool_input.get("signals") or []:
-            if not isinstance(sig, dict):
-                continue
-            refs = sig.get("source_refs") or sig.get("sources") or []
-            if isinstance(refs, list):
-                key = "source_refs" if "source_refs" in sig else "sources"
-                sig[key] = [
-                    id_remap.get(r, r) if isinstance(r, int) else r for r in refs
-                ]
     return tool_input, id_remap
 
 
@@ -1823,77 +1765,6 @@ def _url_to_source_id_map(tool_input: dict[str, Any]) -> dict[str, int]:
     return out
 
 
-def _map_parallel_signal_type(raw: Any) -> str | None:
-    if not isinstance(raw, str):
-        return None
-    t = raw.lower().strip().replace("-", "_").replace(" ", "_")
-    if t in _VALID_SIGNAL_TYPES:
-        return t
-    return _SIGNAL_TYPE_ALIASES.get(t)
-
-
-def _harvest_parallel_signals_if_thin(
-    tool_input: dict[str, Any],
-    parallel_output: dict[str, Any] | None,
-    *,
-    min_signals: int = _SYNTH_MIN_SIGNALS,
-) -> tuple[dict[str, Any], int]:
-    """Promote Parallel's `signals[]` when Claude under-delivered on first pass."""
-    existing = [s for s in (tool_input.get("signals") or []) if isinstance(s, dict)]
-    if len(existing) >= min_signals:
-        return tool_input, 0
-
-    url_to_id = _url_to_source_id_map(tool_input)
-    harvested: list[dict[str, Any]] = []
-    seen_headlines: set[str] = {
-        (s.get("headline") or "").strip().lower() for s in existing if s.get("headline")
-    }
-
-    brief, _ = _unwrap_parallel_output(parallel_output)
-    for ps in brief.get("signals") or []:
-        if not isinstance(ps, dict):
-            continue
-        headline = (ps.get("headline") or "").strip()
-        if not headline:
-            continue
-        norm_headline = headline.lower()
-        if norm_headline in seen_headlines:
-            continue
-        sig_type = _map_parallel_signal_type(ps.get("type"))
-        if not sig_type:
-            continue
-
-        source_ids: list[int] = []
-        for url in ps.get("source_urls") or []:
-            if not isinstance(url, str):
-                continue
-            norm = url.strip().lower().rstrip("/")
-            if norm in url_to_id:
-                source_ids.append(url_to_id[norm])
-
-        weight = ps.get("weight")
-        if not isinstance(weight, int) or weight < 1 or weight > 10:
-            weight = 5
-
-        harvested.append({
-            "type": sig_type,
-            "headline": headline,
-            "evidence": ps.get("evidence"),
-            "date": ps.get("date"),
-            "weight": weight,
-            "sources": source_ids,
-        })
-        seen_headlines.add(norm_headline)
-        if len(existing) + len(harvested) >= min_signals:
-            break
-
-    if not harvested:
-        return tool_input, 0
-
-    tool_input["signals"] = existing + harvested
-    return tool_input, len(harvested)
-
-
 async def _postprocess_synth_tool_input(
     run_id: uuid.UUID,
     tool_input: dict[str, Any],
@@ -1936,24 +1807,6 @@ async def _postprocess_synth_tool_input(
             },
         )
 
-    signals_before = len(tool_input.get("signals") or [])
-    tool_input, harvested = _harvest_parallel_signals_if_thin(
-        tool_input, parallel_output
-    )
-    if harvested:
-        await emit(
-            run_id, "signals_harvested",
-            f"Harvested {harvested} signal(s) from Parallel brief "
-            f"(Claude returned {signals_before}, now {signals_before + harvested}).",
-            level="info",
-            meta={
-                "stage": 3,
-                "claude_signals": signals_before,
-                "harvested": harvested,
-                "final_total": signals_before + harvested,
-            },
-        )
-
     tool_input, parallel_promoted = _promote_parallel_brief_fields_into_card(
         tool_input, parallel_output
     )
@@ -1986,7 +1839,7 @@ async def _postprocess_synth_tool_input(
                 },
             )
 
-    return tool_input
+    return _strip_bd_synthesis_output(tool_input)
 
 
 async def _stage3_synthesize(
@@ -2057,8 +1910,6 @@ async def _stage3_synthesize(
         f"EXA SNIPPETS ({len(exa_bundle.contents)} pages):\n{exa_block}\n\n"
         f"DIFFBOT KG EVIDENCE:\n{diffbot_evidence}\n\n"
         "PRE-FLIGHT (mandatory before calling the tool):\n"
-        f"- `signals`: at least {_SYNTH_MIN_SIGNALS} entries. Parallel's `signals[]` "
-        "block is pre-vetted — translate each into the card signal schema.\n"
         f"- `sources_and_confidence.sources`: at least {_SYNTH_MIN_SOURCES} entries "
         "from the CANDIDATE SOURCE REGISTRY above (preserve the exact ids shown).\n\n"
         "Produce the final CompanyCardV1 via the synthesize_company_card tool. "
@@ -2096,8 +1947,8 @@ async def _stage3_synthesize(
     total_cost = resp.cost_usd
 
     # ── Deterministic post-process (free — fixes the common failure mode where
-    # Claude fills identity blocks but omits sources[] / under-populates
-    # signals[] even though Parallel + the registry already have them).
+    # Claude fills identity blocks but omits sources[] even though Parallel +
+    # the registry already have them).
     tool_input = await _postprocess_synth_tool_input(
         run_id,
         tool_input,
@@ -2108,103 +1959,6 @@ async def _stage3_synthesize(
         domain_hint=p.domain_hint,
         diffbot_score_threshold=cfg.diffbot.score_threshold,
     )
-
-    signals = tool_input.get("signals") or []
-    sources = (
-        (tool_input.get("sources_and_confidence") or {}).get("sources") or []
-    )
-
-    # ── Retry-on-thin (worst case only): signals still below floor after
-    # harvest. Never burn a second LLM pass for missing sources — the
-    # registry backfill above handles that deterministically.
-    if len(signals) < _SYNTH_MIN_SIGNALS:
-        await emit(
-            run_id, "synthesis_retry",
-            f"Synth returned thin signals ({len(signals)}<{_SYNTH_MIN_SIGNALS}) "
-            "after registry backfill + Parallel harvest; requesting expansion.",
-            level="warn",
-            meta={
-                "stage": 3,
-                "signals_returned": len(signals),
-                "sources_returned": len(sources),
-                "min_signals": _SYNTH_MIN_SIGNALS,
-                "min_sources": _SYNTH_MIN_SOURCES,
-                "reason": "signals_below_floor",
-            },
-        )
-        prev_payload_json = json.dumps(tool_input, ensure_ascii=False)[:60000]
-        retry_messages = [
-            ClaudeMessage(role="user", content=user_msg),
-            ClaudeMessage(
-                role="assistant",
-                content=(
-                    "I previously emitted the following synthesize_company_card "
-                    "payload (shown here as JSON for reference):\n"
-                    f"```json\n{prev_payload_json}\n```"
-                ),
-            ),
-            ClaudeMessage(
-                role="user",
-                content=(
-                    f"That call returned only {len(signals)} signals, below the "
-                    f"contract minimum of {_SYNTH_MIN_SIGNALS}. Sources are already "
-                    f"covered ({len(sources)} in the card). Re-emit the FULL card "
-                    "via the synthesize_company_card tool, keeping every good field "
-                    f"you already produced and EXPANDING `signals` to at least "
-                    f"{_SYNTH_MIN_SIGNALS}. Derive them from Parallel's signals[] "
-                    "block, Exa snippets, and Diffbot KG evidence — see system "
-                    "rules for valid types. Don't invent facts — surface what's "
-                    "clearly present in the evidence."
-                ),
-            ),
-        ]
-        resp2 = await client.complete(
-            model=SYNTH_MODEL,
-            system=_SYNTH_SYSTEM,
-            messages=retry_messages,
-            max_tokens=SYNTH_MAX_TOKENS,
-            temperature=0.3,
-            tools=[tool],
-            tool_choice={"type": "tool", "name": "synthesize_company_card"},
-            timeout_s=SYNTH_TIMEOUT_S,
-        )
-        async with factory() as s:
-            await log_claude_call(
-                s, resp2, operation="synthesize_card_retry", run_id=run_id,
-                meta={"company_name": p.company_name, "attempt": 2},
-            )
-        if resp2.status == "ok":
-            total_cost += resp2.cost_usd
-            ti2 = resp2.first_tool_input
-            if isinstance(ti2, dict):
-                ti2 = await _postprocess_synth_tool_input(
-                    run_id,
-                    ti2,
-                    candidate_sources,
-                    parallel_resp.output_json,
-                    diffbot_resp=diffbot_resp,
-                    company_name=p.company_name,
-                    domain_hint=p.domain_hint,
-                    diffbot_score_threshold=cfg.diffbot.score_threshold,
-                )
-                new_signals = ti2.get("signals") or []
-                # Accept retry only if strictly more signals (sources already
-                # handled deterministically — don't regress signal count).
-                if len(new_signals) > len(signals):
-                    tool_input = ti2
-                    signals = new_signals
-        sources = (
-            (tool_input.get("sources_and_confidence") or {}).get("sources") or []
-        )
-        await emit(
-            run_id, "synthesis_retry_done",
-            f"Retry produced signals={len(signals)}, sources={len(sources)}.",
-            meta={
-                "stage": 3,
-                "signals_final": len(signals),
-                "sources_final": len(sources),
-            },
-        )
 
     return tool_input, total_cost
 
@@ -2218,7 +1972,7 @@ async def _stage4_persist(
     card: CompanyCardV1,
     factory: async_sessionmaker[AsyncSession],
 ) -> tuple[uuid.UUID, uuid.UUID]:
-    """Upsert Company, insert Card + Signals + Sources, point canonical FK."""
+    """Upsert Company, insert Card + Sources, point canonical FK."""
     ident = card.company_identity
     domain = _normalize_domain(ident.domain or ident.website or p.domain_hint)
     company_name = ident.company_name or p.company_name
@@ -2271,20 +2025,21 @@ async def _stage4_persist(
             run_id=run_id,
             schema_version=card.schema_version,
             card={},  # filled below after we know card_row.id
-            score_overall=card.scores.overall,
-            score_growth=card.scores.growth,
-            score_momentum=card.scores.momentum,
-            score_fundraising=card.scores.fundraising_likelihood,
-            score_acquisition=card.scores.acquisition_likelihood,
-            score_partnership_fit=card.scores.partnership_fit,
-            score_strategic_fit=card.scores.strategic_fit,
-            score_risk=card.scores.risk,
+            score_overall=None,
+            score_growth=None,
+            score_momentum=None,
+            score_fundraising=None,
+            score_acquisition=None,
+            score_partnership_fit=None,
+            score_strategic_fit=None,
+            score_risk=None,
             review_status="draft",
         )
         s.add(card_row)
         await s.flush()
         card.card_id = str(card_row.id)
         card_row.card = card.model_dump(mode="json")
+        persist_card_profile_parameters_sync(s, card_row=card_row, card_dict=card_row.card)
 
         # Point the company at its new canonical card.
         company.canonical_card_id = card_row.id
@@ -2305,22 +2060,6 @@ async def _stage4_persist(
                     last_checked=_safe_date(src.last_checked) or date.today(),
                     snippet=src.snippet,
                     freshness_score=src.freshness_score,
-                )
-            )
-
-        # Insert signals
-        for sig in card.signals:
-            s.add(
-                Signal(
-                    company_id=company.id,
-                    card_id=card_row.id,
-                    type=sig.type,
-                    subtype=sig.subtype,
-                    headline=sig.headline or "",
-                    evidence=sig.evidence,
-                    weight=int(sig.weight or 5),
-                    signal_date=_safe_date(sig.date),
-                    source_refs=sig.sources or [],
                 )
             )
 
@@ -2414,42 +2153,6 @@ def _safe_date(v: Any) -> date | None:
 
 _VALID_CONFIDENCE = {"confirmed", "estimated", "inferred", "unknown"}
 
-# Mirror of schemas.blocks.SignalType. Kept inline to avoid import cycles;
-# if you add a new SignalType, add it here too.
-_VALID_SIGNAL_TYPES = {
-    "growth", "fundraising", "acquisition", "partnership", "risk", "strategic",
-}
-# Loose remap for the common Claude mis-emissions we see in the wild. Anything
-# not in this map AND not in _VALID_SIGNAL_TYPES gets the signal dropped (we
-# would rather lose one bad row than fail the whole run on enum validation).
-_SIGNAL_TYPE_ALIASES = {
-    "product": "growth",
-    "product_launch": "growth",
-    "launch": "growth",
-    "hiring": "growth",
-    "team": "growth",
-    "press": "growth",
-    "marketing": "growth",
-    "traction": "growth",
-    "review": "risk",
-    "reviews": "risk",
-    "sentiment": "risk",
-    "regulatory": "risk",
-    "compliance": "risk",
-    "funding": "fundraising",
-    "raise": "fundraising",
-    "round": "fundraising",
-    "ma": "acquisition",
-    "m&a": "acquisition",
-    "exit": "acquisition",
-    "distribution": "partnership",
-    "channel": "partnership",
-    "founder": "strategic",
-    "leadership": "strategic",
-    "positioning": "strategic",
-    "category": "strategic",
-}
-
 
 def _sanitize_card_dict(d: Any) -> Any:
     """Best-effort fix-up for common Claude mistakes before pydantic validation.
@@ -2462,33 +2165,8 @@ def _sanitize_card_dict(d: Any) -> Any:
         boilerplate basis so the validator passes;
       - normalizes weird confidence strings (e.g. "Confirmed", "high") to a
         valid enum value.
-
-    Also prunes/remaps `signals[].type` against the SignalType enum so a single
-    bad row doesn't detonate the whole Pydantic validation pass. Bad rows are
-    dropped (the retry-on-thin path will fire if we fall below the floor).
     """
     if isinstance(d, dict):
-        # Signal type sanitization — runs before recursion so the child dicts
-        # we recurse into are already normalized.
-        sigs = d.get("signals")
-        if isinstance(sigs, list):
-            cleaned: list[Any] = []
-            for s in sigs:
-                if not isinstance(s, dict):
-                    continue
-                t_raw = s.get("type")
-                t = (
-                    t_raw.lower().strip().replace("-", "_").replace(" ", "_")
-                    if isinstance(t_raw, str) else ""
-                )
-                if t in _VALID_SIGNAL_TYPES:
-                    s["type"] = t
-                    cleaned.append(s)
-                elif t in _SIGNAL_TYPE_ALIASES:
-                    s["type"] = _SIGNAL_TYPE_ALIASES[t]
-                    cleaned.append(s)
-                # else: silently drop — retry path will catch it
-            d["signals"] = cleaned
         if "confidence" in d:
             conf_raw = d.get("confidence")
             conf = (

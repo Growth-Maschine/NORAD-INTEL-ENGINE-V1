@@ -1,7 +1,7 @@
 """`sources` table — denormalized for fast attribution lookup.
 
 Cross-company drift is prevented by a **composite FK** against
-`cards(id, company_id)` — same pattern as `signals`.
+`cards(id, company_id)` — same composite-FK pattern as `sources`.
 """
 from __future__ import annotations
 

@@ -5,9 +5,11 @@ Endpoints under `/api/research/*`:
     POST /runs                     — kick off a research run for a company
     GET  /runs/:id                 — poll run status (SSE is preferred)
     GET  /cards/:id                — fetch a finished CompanyCardV1 (full JSON)
+    GET  /cards/:id/profile-completeness — 44 must-have params + summary
     GET  /companies                — list known companies (by latest card)
     GET  /discovered               — Web Discovery mentions as companies rows
     GET  /companies/:id            — one company + its canonical card + lists
+    GET  /companies/:id/profile-completeness — canonical card completeness
 
 Runs in-process via `asyncio.create_task` — no separate worker process.
 """
@@ -27,7 +29,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import get_session
-from app.models import Article, Card, Company, Run, Signal, Source, WebDiscoveryCluster
+from app.models import Article, Card, CardProfileParameter, Company, Run, Source, WebDiscoveryCluster
+from app.services.card_profile_parameters import load_card_profile_parameters
 from app.services.company_evidence import get_company_evidence
 from app.services.research import ResearchParams, execute_research
 
@@ -90,8 +93,43 @@ class CardOut(BaseModel):
     score_partnership_fit: int | None
     score_strategic_fit: int | None
     score_risk: int | None
+    profile_completeness_pct: int | None = None
+    profile_verified_count: int | None = None
+    profile_uncertain_count: int | None = None
+    profile_missing_count: int | None = None
     card: dict[str, Any]
     created_at: datetime
+
+
+class ProfileCompletenessParamOut(BaseModel):
+    param_key: str
+    group_name: str
+    sort_order: int
+    label: str
+    value: Any = None
+    confidence: str
+    basis: str | None = None
+    source_refs: list[int] = Field(default_factory=list)
+    coverage_status: str
+
+
+class ProfileCompletenessGroupOut(BaseModel):
+    group_name: str
+    verified_count: int
+    uncertain_count: int
+    missing_count: int
+    parameters: list[ProfileCompletenessParamOut]
+
+
+class ProfileCompletenessOut(BaseModel):
+    card_id: uuid.UUID
+    company_id: uuid.UUID
+    completeness_pct: int
+    verified_count: int
+    uncertain_count: int
+    missing_count: int
+    total_count: int
+    groups: list[ProfileCompletenessGroupOut]
 
 
 class CompanyOut(BaseModel):
@@ -112,7 +150,6 @@ class CompanyOut(BaseModel):
 class CompanyDetail(BaseModel):
     company: CompanyOut
     card: CardOut | None
-    signals: list[dict[str, Any]]
     sources: list[dict[str, Any]]
 
 
@@ -302,6 +339,42 @@ async def get_card(
     if card is None:
         raise HTTPException(404, "card not found")
     return _card_to_out(card)
+
+
+@router.get("/cards/{card_id}/profile-completeness", response_model=ProfileCompletenessOut)
+async def get_card_profile_completeness(
+    card_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> ProfileCompletenessOut:
+    card = await session.get(Card, card_id)
+    if card is None:
+        raise HTTPException(404, "card not found")
+    rows = await load_card_profile_parameters(session, card_id)
+    if not rows:
+        raise HTTPException(404, "profile completeness not materialized for this card")
+    return _profile_completeness_to_out(card, rows)
+
+
+@router.get(
+    "/companies/{company_id}/profile-completeness",
+    response_model=ProfileCompletenessOut,
+)
+async def get_company_profile_completeness(
+    company_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+) -> ProfileCompletenessOut:
+    company = await session.get(Company, company_id)
+    if company is None:
+        raise HTTPException(404, "company not found")
+    if not company.canonical_card_id:
+        raise HTTPException(404, "company has no canonical card")
+    card = await session.get(Card, company.canonical_card_id)
+    if card is None:
+        raise HTTPException(404, "canonical card not found")
+    rows = await load_card_profile_parameters(session, card.id)
+    if not rows:
+        raise HTTPException(404, "profile completeness not materialized for this card")
+    return _profile_completeness_to_out(card, rows)
 
 
 # ── GET /companies ───────────────────────────────────────────────────────────
@@ -612,15 +685,9 @@ async def get_company(
     if company.canonical_card_id:
         card = await session.get(Card, company.canonical_card_id)
 
-    # Scope signals + sources to the *canonical* card so historical re-runs
-    # don't pollute the detail view with mismatched citation ids.
+    # Scope sources to the *canonical* card so historical re-runs don't pollute
+    # the detail view with mismatched citation ids.
     if card is not None:
-        signals = (
-            await session.execute(
-                select(Signal).where(Signal.card_id == card.id)
-                .order_by(Signal.signal_date.desc().nulls_last(), Signal.created_at.desc())
-            )
-        ).scalars().all()
         sources = (
             await session.execute(
                 select(Source).where(Source.card_id == card.id)
@@ -628,12 +695,11 @@ async def get_company(
             )
         ).scalars().all()
     else:
-        signals, sources = [], []
+        sources = []
 
     return CompanyDetail(
         company=_company_to_out(company, card.score_overall if card else None),
         card=_card_to_out(card) if card else None,
-        signals=[_signal_to_dict(s) for s in signals],
         sources=[_source_to_dict(s) for s in sources],
     )
 
@@ -659,7 +725,64 @@ def _card_to_out(c: Card) -> CardOut:
         score_momentum=c.score_momentum, score_fundraising=c.score_fundraising,
         score_acquisition=c.score_acquisition, score_partnership_fit=c.score_partnership_fit,
         score_strategic_fit=c.score_strategic_fit, score_risk=c.score_risk,
+        profile_completeness_pct=c.profile_completeness_pct,
+        profile_verified_count=c.profile_verified_count,
+        profile_uncertain_count=c.profile_uncertain_count,
+        profile_missing_count=c.profile_missing_count,
         card=c.card or {}, created_at=c.created_at,
+    )
+
+
+def _profile_completeness_to_out(
+    card: Card,
+    rows: list[CardProfileParameter],
+) -> ProfileCompletenessOut:
+    groups_map: dict[str, list[ProfileCompletenessParamOut]] = {}
+    group_order: list[str] = []
+    for row in rows:
+        if row.group_name not in groups_map:
+            groups_map[row.group_name] = []
+            group_order.append(row.group_name)
+        groups_map[row.group_name].append(
+            ProfileCompletenessParamOut(
+                param_key=row.param_key,
+                group_name=row.group_name,
+                sort_order=row.sort_order,
+                label=row.label,
+                value=row.value,
+                confidence=row.confidence,
+                basis=row.basis,
+                source_refs=list(row.source_refs or []),
+                coverage_status=row.coverage_status,
+            )
+        )
+
+    groups: list[ProfileCompletenessGroupOut] = []
+    for name in group_order:
+        params = groups_map[name]
+        groups.append(
+            ProfileCompletenessGroupOut(
+                group_name=name,
+                verified_count=sum(1 for p in params if p.coverage_status == "verified"),
+                uncertain_count=sum(1 for p in params if p.coverage_status == "uncertain"),
+                missing_count=sum(1 for p in params if p.coverage_status == "missing"),
+                parameters=params,
+            )
+        )
+
+    verified = card.profile_verified_count or 0
+    uncertain = card.profile_uncertain_count or 0
+    missing = card.profile_missing_count or 0
+    total = verified + uncertain + missing
+    return ProfileCompletenessOut(
+        card_id=card.id,
+        company_id=card.company_id,
+        completeness_pct=card.profile_completeness_pct or 0,
+        verified_count=verified,
+        uncertain_count=uncertain,
+        missing_count=missing,
+        total_count=total,
+        groups=groups,
     )
 
 
@@ -672,19 +795,6 @@ def _company_to_out(c: Company, score_overall: int | None = None) -> CompanyOut:
         canonical_card_id=c.canonical_card_id,
         score_overall=score_overall, created_at=c.created_at,
     )
-
-
-def _signal_to_dict(s: Signal) -> dict[str, Any]:
-    return {
-        "id": str(s.id),
-        "type": s.type,
-        "subtype": s.subtype,
-        "headline": s.headline,
-        "evidence": s.evidence,
-        "weight": s.weight,
-        "signal_date": s.signal_date.isoformat() if s.signal_date else None,
-        "source_refs": s.source_refs or [],
-    }
 
 
 def _source_to_dict(s: Source) -> dict[str, Any]:

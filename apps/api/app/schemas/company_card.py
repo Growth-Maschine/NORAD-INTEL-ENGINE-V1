@@ -28,7 +28,18 @@ from app.schemas.blocks import (
     TechnologyIpDefensibility,
     TractionAndMomentum,
 )
-from app.schemas.tiers import enforce_contract_required, strip_tier_c
+from app.schemas.tiers import (
+    enforce_contract_required,
+    strip_nested_properties,
+    strip_tier_c,
+    strip_top_level_blocks,
+)
+
+# Omitted from the synthesizer contract — BD signals/scores live on a future frontend.
+_SYNTHESIS_CONTRACT_EXCLUDED_TOP = ("signals", "scores")
+_CONTRACT_TOP_BLOCKS = [
+    b for b in _REQUIRED_TOP_BLOCKS if b not in _SYNTHESIS_CONTRACT_EXCLUDED_TOP
+]
 
 # Top-level blocks that we require engines to return (even if empty objects).
 # Forces structure on the JSON output contract — engines can't omit a block.
@@ -133,7 +144,14 @@ def get_contract_schema() -> dict[str, Any]:
     `Valued.confidence` to be required so engines must return structure.
     Worker auto-stubs Tier-C fields after the engines return.
     """
+    schema = strip_tier_c(CompanyCardV1.model_json_schema())
+    schema = strip_top_level_blocks(schema, _SYNTHESIS_CONTRACT_EXCLUDED_TOP)
+    schema = strip_nested_properties(
+        schema,
+        "strategic_fit",
+        ("recommended_next_action", "recommended_action_rationale"),
+    )
     return enforce_contract_required(
-        strip_tier_c(CompanyCardV1.model_json_schema()),
-        required_top_level=_REQUIRED_TOP_BLOCKS,
+        schema,
+        required_top_level=_CONTRACT_TOP_BLOCKS,
     )

@@ -51,6 +51,16 @@ def test_full_schema_has_top_level_required() -> None:
     assert must_have.issubset(required), required
 
 
+def test_contract_excludes_signals_and_scores() -> None:
+    contract = get_contract_schema()
+    required = set(contract.get("required", []))
+    assert "signals" not in required
+    assert "scores" not in required
+    props = contract.get("properties", {})
+    assert "signals" not in props
+    assert "scores" not in props
+
+
 def test_contract_drops_tier_c_paths() -> None:
     full = get_full_schema()
     contract = get_contract_schema()

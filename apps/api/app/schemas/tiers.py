@@ -46,6 +46,43 @@ def _strip_node(node: dict[str, Any]) -> None:
             node["required"].remove(name)
 
 
+def strip_top_level_blocks(
+    schema: dict[str, Any],
+    excluded: tuple[str, ...] | list[str],
+) -> dict[str, Any]:
+    """Remove top-level properties (and from `required`) from a JSON Schema copy."""
+    out = deepcopy(schema)
+    props = out.get("properties")
+    if isinstance(props, dict):
+        for name in excluded:
+            props.pop(name, None)
+    if "required" in out and isinstance(out["required"], list):
+        out["required"] = [r for r in out["required"] if r not in excluded]
+    return out
+
+
+def strip_nested_properties(
+    schema: dict[str, Any],
+    block_name: str,
+    excluded: tuple[str, ...] | list[str],
+) -> dict[str, Any]:
+    """Remove named properties from a top-level object block in the schema."""
+    out = deepcopy(schema)
+    props = out.get("properties")
+    if not isinstance(props, dict):
+        return out
+    block = props.get(block_name)
+    if not isinstance(block, dict):
+        return out
+    block_props = block.get("properties")
+    if isinstance(block_props, dict):
+        for name in excluded:
+            block_props.pop(name, None)
+    if "required" in block and isinstance(block["required"], list):
+        block["required"] = [r for r in block["required"] if r not in excluded]
+    return out
+
+
 def enforce_contract_required(
     schema: dict[str, Any],
     required_top_level: list[str],

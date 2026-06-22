@@ -29,7 +29,7 @@ class Card(Base, UUIDPrimaryKey, TimestampsMixin):
 
     The `UniqueConstraint(id, company_id)` lets other tables form a
     *composite* foreign key against `(card_id, company_id)` — that's how we
-    prevent cross-company drift on signals/sources/canonical_card_id.
+    prevent cross-company drift on sources/canonical_card_id.
     """
 
     __tablename__ = "cards"
@@ -62,6 +62,12 @@ class Card(Base, UUIDPrimaryKey, TimestampsMixin):
 
     review_status: Mapped[str] = mapped_column(String(16), default="draft", index=True)
     reviewer_notes: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # Materialized profile-completeness summary (49 must-have params).
+    profile_completeness_pct: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    profile_verified_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    profile_uncertain_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    profile_missing_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("id", "company_id", name="uq_cards_id_company"),
@@ -98,5 +104,9 @@ class Card(Base, UUIDPrimaryKey, TimestampsMixin):
         CheckConstraint(
             "score_risk IS NULL OR (score_risk BETWEEN 0 AND 100)",
             name="ck_cards_score_risk_range",
+        ),
+        CheckConstraint(
+            "profile_completeness_pct IS NULL OR (profile_completeness_pct BETWEEN 0 AND 100)",
+            name="ck_cards_profile_completeness_pct_range",
         ),
     )

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.admin_auth import require_admin
 from app.core.db import get_session
 from app.engines.exa_client import coerce_exa_highlights
 from app.models.article import Article
@@ -411,6 +412,7 @@ def _query_out(q: WebDiscoveryQuery) -> WebDiscoveryQueryOut:
 @router.get("/clusters", response_model=WebDiscoveryClusterList)
 async def list_web_discovery_clusters(
     session: AsyncSession = Depends(get_session),
+    _: None = Depends(require_admin),
 ) -> WebDiscoveryClusterList:
     stmt = (
         select(WebDiscoveryCluster, func.count(WebDiscoveryQuery.id))
@@ -431,10 +433,9 @@ async def list_web_discovery_clusters(
 @router.post("/clusters", response_model=WebDiscoveryClusterOut, status_code=201)
 async def create_web_discovery_cluster(
     body: WebDiscoveryClusterIn,
-    x_admin_token: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
+    _: None = Depends(require_admin),
 ) -> WebDiscoveryClusterOut:
-    _require_admin_in_prod(x_admin_token)
     slug = slugify(body.name)
     conflict = (
         await session.execute(select(WebDiscoveryCluster.id).where(WebDiscoveryCluster.slug == slug))
@@ -463,6 +464,7 @@ async def create_web_discovery_cluster(
 async def get_web_discovery_cluster(
     cluster_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
+    _: None = Depends(require_admin),
 ) -> WebDiscoveryClusterOut:
     cluster = await session.get(WebDiscoveryCluster, cluster_id)
     if cluster is None:
@@ -479,10 +481,9 @@ async def get_web_discovery_cluster(
 async def update_web_discovery_cluster(
     cluster_id: uuid.UUID,
     body: WebDiscoveryClusterIn,
-    x_admin_token: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
+    _: None = Depends(require_admin),
 ) -> WebDiscoveryClusterOut:
-    _require_admin_in_prod(x_admin_token)
     cluster = await session.get(WebDiscoveryCluster, cluster_id)
     if cluster is None:
         raise HTTPException(404, "web discovery cluster not found")
@@ -521,10 +522,9 @@ async def update_web_discovery_cluster(
 @router.delete("/clusters/{cluster_id}")
 async def delete_web_discovery_cluster(
     cluster_id: uuid.UUID,
-    x_admin_token: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
+    _: None = Depends(require_admin),
 ) -> dict[str, bool]:
-    _require_admin_in_prod(x_admin_token)
     cluster = await session.get(WebDiscoveryCluster, cluster_id)
     if cluster is None:
         return {"ok": True}
