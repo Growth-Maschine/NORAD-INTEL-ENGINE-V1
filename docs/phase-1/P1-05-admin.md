@@ -4,8 +4,8 @@
 |-------|-------|
 | **Document ref** | P1-05-Admin |
 | **Title** | UI Screen Mapping — Admin Console |
-| **Version** | 2.0 |
-| **Last updated** | 2026-06-19 |
+| **Version** | 2.1 |
+| **Last updated** | 2026-06-16 |
 | **Controlling doc** | [P1-00 Overview](./phase-1-overview.md) |
 | **Audience** | Internal developers, operators |
 | **Linear** | [GRO-270](https://linear.app/growthmaschine/issue/GRO-270/50-map-existing-ui-screens-to-product-data-objects) · Parent [GRO-265](https://linear.app/growthmaschine/issue/GRO-265) |
@@ -190,14 +190,14 @@ Shared with analyst journey — same `companies` + `cards` tables on `/companies
 
 ### 3.8 Company detail (`/companies/:id`)
 
-| Purpose | Full Company Card + signals + sources |
-|---------|--------------------------------------|
+| Purpose | Full Company Card + sources + profile completeness |
+|---------|--------------------------------------------------|
 
-**Objects:** Company, Company Card, Research Signal, Source
+**Objects:** Company, Company Card, Source, Profile Completeness Parameter
 
 | Control | Action type | Effect |
 |---------|-------------|--------|
-| Profile tabs | Navigate | Overview, signals, evidence |
+| Profile sections | Navigate | Facts, strategic fit, sources, evidence, completeness audit |
 | Review status | Read | Pending review state |
 | Promote / accept (if exposed) | Escalate | `review_status` → accepted — analyst-primary |
 | Re-run research | Run | New Deep Research Run — if exposed |
@@ -247,8 +247,8 @@ Shared with analyst journey — same `companies` + `cards` tables on `/companies
 | Deep Research Run | Run log, company detail (provenance) |
 | Company | Companies, company detail |
 | Company Card | Company detail |
-| Research Signal | Company detail |
 | Source | Company detail, evidence panels |
+| Profile Completeness Parameter | Company detail — MustHaveCoverage |
 | Run Event | Run log |
 | Engine Call | Run log, settings health |
 | Research Config | Settings |

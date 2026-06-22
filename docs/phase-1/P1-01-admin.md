@@ -4,8 +4,8 @@
 |-------|-------|
 | **Document ref** | P1-01-Admin |
 | **Title** | Core Operator Workflow — Admin Console |
-| **Version** | 3.0 |
-| **Last updated** | 2026-06-19 |
+| **Version** | 3.1 |
+| **Last updated** | 2026-06-16 |
 | **Controlling doc** | [P1-00 Overview](./phase-1-overview.md) |
 | **Paired doc** | [P1-01-User](./P1-01-user.md) — same app, analyst reading journey |
 
@@ -338,7 +338,7 @@ flowchart TD
 | **Entry (API)** | `POST /api/research/runs` with `{ company_name, domain_hint? }` |
 | **Pipeline** | Deep research (`source_kind = research`) |
 | **Backend** | `services/research.py` |
-| **Output** | `CompanyCardV1` in `companies`, `cards`, `signals`, `sources` |
+| **Output** | `CompanyCardV1` in `companies`, `cards`, `sources`, `card_profile_parameters` |
 
 Deep research builds a structured company profile from web evidence. The primary entry from Web Discovery is **Deep research** on a `mentioned_companies` row; the Companies page is where operators monitor runs and read completed profiles.
 
@@ -374,10 +374,10 @@ There is **no** article-level **Escalate** button on the results page. Research 
 
 | Component | Action | Action type | Backend |
 |-----------|--------|-------------|---------|
-| **Activity** panel (left) | Watch timeline for focused company | Monitor | SSE `run_events`; shows stages, costs, synthesis retry events (§4.1) |
+| **Activity** panel (left) | Watch timeline for focused company | Monitor | SSE `run_events`; shows stages, costs, backfill events (§4.1) |
 | **Company row** (collapsed) | Click row header | Navigate | Expands excerpt; Activity panel switches to that company's latest run |
 | **Status pill** | Read | Read | `Profiling…` (live), `Done` (completed), or `failed` / `cancelled` |
-| **Overall score** | Read (right side) | Read | From completed Company Card |
+| **Profile completeness** | Read (when card exists) | Read | From `cards.profile_completeness_pct` |
 | **Run count** | Read | Read | e.g. `6 RUNS` — number of research passes for this company |
 
 **Flow:**
@@ -394,8 +394,7 @@ On load: `GET /api/research/feed`. Live rows poll every 3 s; completed rows ever
 
 | Object / button | Action | Action type | Backend |
 |-----------------|--------|-------------|---------|
-| **Strategic fit** block | Read summary + recommendation pill (e.g. MONITOR) | Read | From `cards.card.strategic_fit` |
-| **Top signals** list | Read first 2 signals (type + headline) | Read | From `signals` table |
+| **Strategic fit** block | Read summary excerpt | Read | From `cards.card.strategic_fit.fit_summary` |
 | **View run log →** | Click | Navigate | Navigate to `/runs/:id` — full run header + Activity feed |
 | **Cancel run** | Click while profiling (live only) | Cancel | `POST /api/research/runs/:id/cancel` |
 | **Open full page →** | Click | Navigate | Navigate to `/companies/:id` |
@@ -404,7 +403,7 @@ On load: `GET /api/research/feed`. Live rows poll every 3 s; completed rows ever
 
 `Expanded row` → `View run log` or `Open full page` → optional `Cancel run` (if live)
 
-**Cancel run** stops the pipeline at the next checkpoint. Engine calls already in flight may finish, but no company/card/signals are saved from that run.
+**Cancel run** stops the pipeline at the next checkpoint. Engine calls already in flight may finish, but no company/card is saved from that run.
 
 **Failure states:**
 
@@ -418,17 +417,17 @@ On load: `GET /api/research/feed`. Live rows poll every 3 s; completed rows ever
 
 ### 3.5 Company detail page (`/companies/:id`)
 
-**What the operator is trying to do:** Read the full company profile — strategic fit, signals, sources, and research evidence.
+**What the operator is trying to do:** Read the full company profile — strategic fit, sources, profile completeness, and research evidence.
 
 | Component | Action | Action type | Backend |
 |-----------|--------|-------------|---------|
-| **Company header** | Read name, domain, overall score, confidence | Read | `GET /api/research/companies/:id` |
+| **Company header** | Read name, domain, confidence pills | Read | `GET /api/research/companies/:id` |
 | **Follow / Signal Alert / Share** | Click | — | **No handler** — UI shell only |
 | **Key facts panels** | Read classification, financials, team | Read | From `CompanyCardV1` JSON |
-| **Strategic Fit** section | Read narrative | Read | LLM-synthesized in Stage 3 |
-| **Signals** section | Read all signals with evidence | Read | `signals` table |
+| **Strategic Fit** section | Read narrative | Read | LLM-synthesized `fit_summary` in Stage 3 |
 | **Sources** section | Read cited URLs | Read | `sources` table |
 | **Research Evidence** | Expand engine I/O | Read | `GET /api/research/companies/:id/evidence` |
+| **Profile Completeness** | Expand audit groups | Read | `GET /api/research/companies/:id/profile-completeness` |
 | **Profile history** | Click a past run row | Navigate | `/runs/:id`; cancel available on in-flight runs |
 | **Cancel run** (history) | Click on active run | Cancel | `POST /api/research/runs/:id/cancel` |
 
@@ -457,8 +456,8 @@ On load: `GET /api/research/feed`. Live rows poll every 3 s; completed rows ever
 |-------|--------|--------------|
 | 1 — Build input | Application | Loads source context if provided (search result URL, article provenance) |
 | 2 — Fan-out | Parallel + Exa + Diffbot | Structured brief, web content, entity record |
-| 3 — Synthesize | Claude Sonnet 4.5 | Company Card + signals; fallbacks in §4.1 |
-| 4 — Persist | Application | Writes `companies`, `cards`, `signals`, `sources` |
+| 3 — Synthesize | Claude Sonnet 4.5 | Company Card fact blocks + sources; BD signals/scores stripped |
+| 4 — Persist | Application | Writes `companies`, `cards`, `sources`, `card_profile_parameters` |
 
 ---
 
@@ -471,7 +470,7 @@ flowchart TD
     RUNLOG --> S1[Stage 1 · Build input]
     S1 --> S2[Stage 2 · Parallel + Exa + Diffbot fan-out]
     S2 --> S3[Stage 3 · Claude Sonnet · CompanyCardV1]
-    S3 --> S4[Stage 4 · Persist company / card / signals / sources]
+    S3 --> S4[Stage 4 · Persist company / card / sources / profile params]
     S4 --> DONE[Run completed]
 
     DONE --> COMP[Companies feed · expand row]
@@ -489,7 +488,6 @@ flowchart TD
 |-----------|-------------------|-------------|
 | One engine fails in Stage 2 | Run continues with other engines | Activity shows partial OK/FAIL |
 | All engines fail in Stage 2 | Run `failed`; no card saved | Error in Activity; failed status on row |
-| Thin signals after synth | Auto-retry Claude once (§4.1) | `synthesis_retry` events in Activity |
 | Validation fails after coerce | Run `failed`; no orphan card | Error in Activity |
 | 5 concurrent research runs | HTTP 429 | Toast error |
 | User cancels run | `cancelled`; no card from that run | Row shows cancelled |
@@ -504,7 +502,7 @@ Any row below counts as **AI analyzes results** per §1.1.
 |----------|-------|-----|--------------|--------------|
 | Web Discovery | Per new article | Claude Sonnet | Executive summary + mentioned companies | `articles`, `runs.engine_outputs` |
 | Web Discovery | Search | — | Exa search + contents | `engine_calls`, `articles.body_text` |
-| Deep Research | 3 — Synthesize | Claude Sonnet | Full Company Card + signal extraction | `cards.card`, `signals` |
+| Deep Research | 3 — Synthesize | Claude Sonnet | Full Company Card fact blocks | `cards.card`, `sources`, `card_profile_parameters` |
 
 ### 4.1 AI failure and fallback behaviour
 
@@ -517,11 +515,10 @@ When an LLM or AI step fails, the pipeline may **skip**, **fall back to other en
 | 2 — Engine fan-out | One engine fails (Parallel, Exa, or Diffbot) | **Run continues** with remaining engines |
 | 2 — Engine fan-out | All three engines fail | **Run fails** — no card saved |
 | 3 — Sonnet synthesize (validation) | Pydantic validation error on card JSON | **Auto-coerce** bare scalars into `Valued[]` wrappers and re-validate once |
-| 3 — Sonnet synthesize (thin output) | After first pass: sources backfilled from registry; Parallel signals harvested; Parallel/Diffbot fields promoted | **Deterministic backfill** — no extra LLM cost |
-| 3 — Sonnet synthesize (still thin signals) | Fewer than 3 signals after backfill + harvest | **Auto-retry** — second Claude call (`synthesize_card_retry`) asking to expand signals; accepted only if signal count increases |
+| 3 — Sonnet synthesize (thin output) | After first pass: sources backfilled from registry; Parallel/Diffbot fields promoted | **Deterministic backfill** — no extra LLM cost |
 | 3 — Sonnet synthesize (hard failure) | Validation still fails after coerce, or unrecoverable synth error | **Run fails** — no card saved |
 
-Activity panel events for research fallbacks include: `sources_backfilled`, `signals_harvested`, `parallel_fields_promoted`, `diffbot_fields_promoted`, `synthesis_retry`, `synthesis_retry_done`, `synthesis_coerce_recovered`.
+Activity panel events for research fallbacks include: `sources_backfilled`, `parallel_fields_promoted`, `diffbot_fields_promoted`, `synthesis_coerce_recovered`.
 
 #### Web Discovery
 
@@ -539,7 +536,7 @@ Automatic persistence (pipeline writes to DB) is **not** the same as a user **Sa
 
 | Action | Web Discovery | Deep Research |
 |--------|---------------|---------------|
-| **Auto-persist** | Yes — `articles` + `runs.engine_outputs` | Yes — `companies`, `cards`, `signals`, `sources` |
+| **Auto-persist** | Yes — `articles` + `runs.engine_outputs` | Yes — `companies`, `cards`, `sources`, `card_profile_parameters` |
 | **User Save / bookmark** | **Not implemented** (UI) | N/A |
 | **User Dismiss** | **API only** (`POST …/articles/:id/dismiss`) — no UI | N/A |
 | **Deep research** | Per-company button on results page | N/A (this pipeline) |
@@ -571,8 +568,8 @@ Operators configure web search scope (clusters and queries), execute Exa searche
 | Add queries | ✓ | — |
 | Run query or cluster | ✓ | — |
 | View results | Enriched results page | Company Card page |
-| AI analyzes results | Sonnet per article (enrich) | Sonnet synthesis + signals |
-| Review companies in story | Results page | Signals on company page |
+| AI analyzes results | Sonnet per article (enrich) | Sonnet synthesis (facts + sources) |
+| Review companies in story | Results page | Company profile page |
 | User save | **Not built** | — |
 | User dismiss | **API only** | — |
 | Deep research | Per company on results | This pipeline |
@@ -597,7 +594,7 @@ Operators configure web search scope (clusters and queries), execute Exa searche
 | Can results be saved, dismissed, or escalated? | See §5. |
 | What is AI analysis? | Web Discovery: Sonnet enrich per article. Research: Sonnet Company Card synthesis (§4). |
 | What happens when a run fails? | Toast + error; `runs.status = failed`; operator can re-run. |
-| What happens when AI analysis fails? | See §4.1. **Research:** engine partial-failure tolerated; deterministic backfill + optional Claude retry-on-thin signals; hard validation failure fails the run. |
+| What happens when AI analysis fails? | See §4.1. **Research:** engine partial-failure tolerated; deterministic source backfill; hard validation failure fails the run. |
 
 ### 6.5 Completion status
 

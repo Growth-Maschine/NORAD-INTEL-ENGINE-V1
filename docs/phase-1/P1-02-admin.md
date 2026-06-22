@@ -4,8 +4,8 @@
 |-------|-------|
 | **Document ref** | P1-02-Admin |
 | **Title** | Core Product Objects — Operator perspective |
-| **Version** | 2.0 |
-| **Last updated** | 2026-06-19 |
+| **Version** | 2.1 |
+| **Last updated** | 2026-06-16 |
 | **Audience** | Internal developers, operators |
 | **Controlling doc** | [P1-00 Overview](./phase-1-overview.md) |
 | **Paired doc** | [P1-02-User](./P1-02-user.md) — same objects, analyst reading labels |
@@ -40,7 +40,7 @@ Relationships are answered in [P1-03](./P1-03.md).
 |-------|---------------------|-------------------------------|
 | Web Discovery scope | Cluster, Query, Run | — (operator configures) |
 | Enriched story | Article | Article / result card |
-| Company intelligence | Company Card, Signal | Company Profile, Company Signal |
+| Company intelligence | Company Card | Company Profile |
 | Deep research trigger | Deep research action | Deep research action |
 
 ---
@@ -57,7 +57,7 @@ Relationships are answered in [P1-03](./P1-03.md).
 | Pipeline | Stage | Model | Persisted to |
 |----------|-------|-------|--------------|
 | Web Discovery | Enrich (per new article) | Claude Sonnet | `articles.summary`, `articles.mentioned_companies` (+ `company_id` each); **`companies` rows** (`origin=web_discovery`, `source_article_id`); mirrored in `runs.engine_outputs` |
-| Deep Research | Synthesise | Claude Sonnet 4.5 | `cards.card`, `signals` |
+| Deep Research | Synthesise | Claude Sonnet 4.5 | `cards.card`, `sources`, `card_profile_parameters` |
 
 **Not executed today:** per-query `system_prompt` / `output_schema` on `web_discovery_queries` — saved in DB only.
 
@@ -77,7 +77,7 @@ Relationships are answered in [P1-03](./P1-03.md).
 | 3.8 | Deep Research Run | One company profiling execution | `runs` · `source_kind = research` |
 | 3.9 | Company | Canonical company entity | `companies` |
 | 3.10 | Company Card | Versioned research profile blob | `cards` |
-| 3.11 | Research Signal | Structured signal on a card | `signals` |
+| 3.10 | Profile Completeness Parameter | Materialized audit row on a card | `card_profile_parameters` |
 | 3.12 | Source | Citation backing card fields | `sources` |
 | 3.13 | Run Event | Pipeline stage log line | `run_events` |
 | 3.14 | Engine Call | One vendor API call audit row | `engine_calls` |
@@ -182,7 +182,7 @@ A Search Result is **not** the same row as an Article. Duplicate URLs reuse the 
 
 **Pipeline stages (reference):**
 
-`Build input` → `Parallel + Exa + Diffbot fan-out` → `Sonnet synthesise` → `persist company/card/signals/sources`
+`Build input` → `Parallel + Exa + Diffbot fan-out` → `Sonnet synthesise` → `persist company/card/sources/profile params`
 
 Runs in-process via `asyncio.create_task` — no separate worker.
 
@@ -202,23 +202,25 @@ Runs in-process via `asyncio.create_task` — no separate worker.
 |--|--|
 | **What** | Versioned JSON research profile from one Deep Research Run |
 | **Why** | Full `CompanyCardV1` contract with confidence and sources |
-| **Example** | Card JSON — identity, funding, strategic fit, signals array |
+| **Example** | Card JSON — identity, funding, strategic fit narrative, sources |
 | **Backend** | `cards` — JSONB `card` column; `review_status` (`draft` default) |
 | **Where in UI** | Company detail sections; Research Evidence |
 
 Analyst label for the same row: **Company Profile** ([P1-02-User](./P1-02-user.md)).
 
-### 6.4 Research Signal
+### 6.3.1 Profile Completeness Parameter
 
 | | |
 |--|--|
-| **What** | One structured signal extracted into a Company Card |
-| **Why** | Evidence-backed events for BD qualification |
-| **Example** | GROWTH signal — “$11M Series A Jan 2026” — with source refs |
-| **Backend** | `signals` |
-| **Where in UI** | Company detail → Signals section |
+| **What** | One materialized must-have audit row for a Company Card (44 per card) |
+| **Why** | Queryable profile completeness — verified / uncertain / missing — without parsing JSONB |
+| **Example** | `company_name` → value `CocoGoodsCo`, `coverage_status=verified` in group `Identity` |
+| **Backend** | `card_profile_parameters` — catalog in `profile_completeness.py`; summary on `cards.profile_*` columns |
+| **Where in UI** | Company detail → Profile Completeness panel (`MustHaveCoverage`) |
 
-Analyst label: **Company Signal**.
+### 6.4 Research Signal — RETIRED
+
+**Dropped 2026-06-16.** Table `signals` removed (`0011_drop_signals.sql`). BD signal timeline, fit scores, and recommended actions are owned by a future frontend. Legacy reference: `docs/reference/legacy-signals-scores-suggestions.md`.
 
 ### 6.5 Source
 
@@ -302,7 +304,7 @@ These are **choices** that spawn runs or update state. None are standalone table
 | Deep Research Run | One company profile run | Deep research from result |
 | Company | Canonical entity | takeultra.com |
 | Company Card | Research JSON snapshot | CompanyCardV1 blob |
-| Research Signal | Card signal row | Series A GROWTH |
+| Research Signal | **Retired** — table dropped | See legacy reference doc |
 | Source | Citation row | Exa URL ref |
 | Run Event | Stage log line | Enrich 3/5 OK |
 | Engine Call | Vendor audit row | anthropic call |
@@ -320,7 +322,7 @@ These are **choices** that spawn runs or update state. None are standalone table
 | 2 | Article lifecycle — when is a row created vs reused? |
 | 3 | Company Card ↔ Company Profile — same data? |
 | 4 | Deep Research Run ↔ Pending Review (Phase 2) |
-| 5 | Research Signal ↔ Company Signal |
+| 5 | Research Signal ↔ Company Signal | **Retired** — `signals` table dropped 2026-06-16 |
 | 6 | Run — single table for all `source_kind` values |
 | 7 | Company — merge on complete; domain dedupe |
 | 8 | Results API — hydration from `articles` |

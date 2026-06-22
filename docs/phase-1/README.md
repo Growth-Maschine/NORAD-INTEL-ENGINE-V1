@@ -23,16 +23,16 @@ Each child document defines required product behaviour. When a child doc conflic
 
 | Ref | Title | File | Version | Status |
 |-----|-------|------|---------|--------|
-| P1-00 | **Phase 1 Overview** | [phase-1-overview.md](./phase-1-overview.md) | 1.0 | Current |
-| P1-01-Admin | Core Operator Workflow | [P1-01-admin.md](./P1-01-admin.md) | 3.0 | Current — paired with User |
-| P1-01-User | Core Analyst Workflow | [P1-01-user.md](./P1-01-user.md) | 2.0 | Current — paired with Admin |
-| P1-02-Admin | Core Product Objects (Admin) | [P1-02-admin.md](./P1-02-admin.md) | 2.0 | Current — paired with User |
-| P1-02-User | Core Product Objects | [P1-02-user.md](./P1-02-user.md) | 2.0 | Current — paired with Admin |
-| P1-03 | Object Relationships | [P1-03.md](./P1-03.md) | 2.0 | Current |
-| P1-04-Admin | Required Fields | [P1-04-admin.md](./P1-04-admin.md) | 3.0 | Current |
-| P1-05-Admin | UI Screen Mapping (Admin) | [P1-05-admin.md](./P1-05-admin.md) | 2.0 | Current |
-| P1-05-User | UI Screen Mapping (Analyst) | [P1-05-user.md](./P1-05-user.md) | 2.0 | Current |
-| P1-06 | Backend Actions | [P1-06.md](./P1-06.md) | 2.0 | Current |
+| P1-00 | **Phase 1 Overview** | [phase-1-overview.md](./phase-1-overview.md) | 1.2 | Current |
+| P1-01-Admin | Core Operator Workflow | [P1-01-admin.md](./P1-01-admin.md) | 3.1 | Current — paired with User |
+| P1-01-User | Core Analyst Workflow | [P1-01-user.md](./P1-01-user.md) | 2.1 | Current — paired with Admin |
+| P1-02-Admin | Core Product Objects (Admin) | [P1-02-admin.md](./P1-02-admin.md) | 2.1 | Current — paired with User |
+| P1-02-User | Core Product Objects | [P1-02-user.md](./P1-02-user.md) | 2.1 | Current — paired with Admin |
+| P1-03 | Object Relationships | [P1-03.md](./P1-03.md) | 2.1 | Current |
+| P1-04-Admin | Required Fields | [P1-04-admin.md](./P1-04-admin.md) | 3.2 | Current |
+| P1-05-Admin | UI Screen Mapping (Admin) | [P1-05-admin.md](./P1-05-admin.md) | 2.1 | Current |
+| P1-05-User | UI Screen Mapping (Analyst) | [P1-05-user.md](./P1-05-user.md) | 2.1 | Current |
+| P1-06 | Backend Actions | [P1-06.md](./P1-06.md) | 2.1 | Current |
 | — | Phase 2 SQL tests | [phase2test.md](./phase2test.md) | — | Legacy scenarios |
 
 **Revision order:** P1-00 → P1-01 (Admin + User, paired) → P1-02 → P1-03 → P1-04 → P1-05 → P1-06.
@@ -49,3 +49,4 @@ Each child document defines required product behaviour. When a child doc conflic
 | `apps/api/app/routers/` | Backend HTTP surface |
 | `apps/api/app/models/` | Database models (source of truth) |
 | `apps/api/sql/` | Versioned DDL |
+| [docs/reference/legacy-signals-scores-suggestions.md](../reference/legacy-signals-scores-suggestions.md) | Retired BD signals/scores (pre-2026-06-16) |

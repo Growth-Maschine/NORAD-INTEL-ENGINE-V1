@@ -4,8 +4,8 @@
 |-------|-------|
 | **Document ref** | P1-04 |
 | **Title** | Required Fields per Object |
-| **Version** | 3.1 |
-| **Last updated** | 2026-06-19 |
+| **Version** | 3.2 |
+| **Last updated** | 2026-06-16 |
 | **Audience** | Internal developers, operators |
 | **Controlling doc** | [P1-00 Overview](./phase-1-overview.md) |
 | **Linear** | [GRO-269](https://linear.app/growthmaschine/issue/GRO-269/40-define-required-fields-for-each-core-object) · Parent [GRO-265](https://linear.app/growthmaschine/issue/GRO-265) |
@@ -333,14 +333,18 @@ Table: `cards` · JSON contract: `CompanyCardV1` in `apps/api/app/schemas/`
 | run_id | UUID | No | No | Internal | FK → `runs.id` SET NULL |
 | schema_version | string(16) | Yes | No | Internal | Default `1.0` |
 | card | JSONB | Yes | Yes (JSON) | Company detail tabs | Full `CompanyCardV1` — see schema, not duplicated here |
-| score_overall | integer | No | Yes | Companies list sort | 0–100 denormalized |
-| score_growth | integer | No | Yes | Internal | Sort/filter |
-| score_momentum | integer | No | Yes | Internal | |
-| score_fundraising | integer | No | Yes | Internal | |
-| score_acquisition | integer | No | Yes | Internal | |
-| score_partnership_fit | integer | No | Yes | Internal | |
-| score_strategic_fit | integer | No | Yes | Internal | |
-| score_risk | integer | No | Yes | Internal | |
+| score_overall | integer | No | Yes | Companies list sort | **Legacy** — `NULL` on new cards; pre-2026-06 rows may have values |
+| score_growth | integer | No | Yes | Internal | **Legacy** — not written by pipeline |
+| score_momentum | integer | No | Yes | Internal | **Legacy** |
+| score_fundraising | integer | No | Yes | Internal | **Legacy** |
+| score_acquisition | integer | No | Yes | Internal | **Legacy** |
+| score_partnership_fit | integer | No | Yes | Internal | **Legacy** |
+| score_strategic_fit | integer | No | Yes | Internal | **Legacy** |
+| score_risk | integer | No | Yes | Internal | **Legacy** |
+| profile_completeness_pct | integer | No | Yes | Profile Completeness header | 0–100 — materialized at card persist |
+| profile_verified_count | integer | No | Yes | Profile Completeness header | Count of `verified` params |
+| profile_uncertain_count | integer | No | Yes | Profile Completeness header | Count of `uncertain` params |
+| profile_missing_count | integer | No | Yes | Profile Completeness header | Count of `missing` params |
 | review_status | enum (`draft`, `accepted`, `rejected`, `archived`) | Yes | Yes | Companies list pill | `draft` default — Pending Review UI is Phase 2 |
 | reviewer_notes | text | No | No | Internal | |
 | created_at | timestamptz | Yes | Yes | Profile history | |
@@ -348,24 +352,13 @@ Table: `cards` · JSON contract: `CompanyCardV1` in `apps/api/app/schemas/`
 
 **`card` JSONB** — document structure in `docs/backend-pipeline.md` and `apps/api/app/schemas/company_card.py`. P1-04 does not duplicate `Valued[]` blocks.
 
-### 4.4 Research Signal
+**Profile completeness summary** — denormalized on `cards` from the 44 must-have parameters in `card_profile_parameters` (§4.6). Filled at persist time by `profile_completeness.py` — not computed in the UI.
 
-Table: `signals` · Analyst label: Company Signal
+### 4.4 Research Signal — RETIRED
 
-| Field | Type | Required | Searchable | UI | Notes |
-|-------|------|----------|------------|-----|-------|
-| id | UUID | Yes | No | Internal | PK |
-| company_id | UUID | Yes | Yes | Internal | FK → `companies.id` |
-| card_id | UUID | Yes | No | Internal | Composite FK with company_id |
-| type | enum (`growth`, `fundraising`, `acquisition`, `partnership`, `risk`, `strategic`) | Yes | Yes | Signals section | |
-| subtype | string(64) | No | Yes | Signals section | |
-| headline | text | Yes | Yes | Signals timeline | |
-| evidence | text | No | Yes | Signals expand | |
-| weight | integer | Yes | Yes | Signals sort | 1–10 |
-| signal_date | date | No | Yes | Signals timeline | |
-| source_refs | JSON array | Yes | No | Internal | `[source.local_id, ...]` |
-| created_at | timestamptz | Yes | No | Internal | |
-| updated_at | timestamptz | Yes | No | Internal | |
+**Dropped 2026-06-16** — table `signals` removed by migration `0011_drop_signals.sql`. Deep Research no longer extracts or persists BD signal rows. Fit scores (`score_*`) and recommended actions are also stripped from synthesis.
+
+Legacy behaviour (for a future frontend): `docs/reference/legacy-signals-scores-suggestions.md`.
 
 ### 4.5 Source
 
@@ -388,6 +381,37 @@ Table: `sources`
 | freshness_score | float | No | No | Internal | |
 | created_at | timestamptz | Yes | No | Internal | |
 | updated_at | timestamptz | Yes | No | Internal | |
+
+### 4.6 Profile Completeness Parameter
+
+Table: `card_profile_parameters` · Catalog: `apps/api/app/services/profile_completeness.py`
+
+One row per **must-have profile parameter** per card (44 rows per `CompanyCardV1`). Materialized when Deep Research persists a card. API consumers read this table instead of recomputing coverage from `cards.card` JSONB.
+
+| Field | Type | Required | Searchable | UI | Notes |
+|-------|------|----------|------------|-----|-------|
+| id | UUID | Yes | No | Internal | PK |
+| company_id | UUID | Yes | No | Internal | FK → `companies.id` CASCADE |
+| card_id | UUID | Yes | No | Internal | Composite FK with `company_id` → `cards(id, company_id)` |
+| param_key | string(64) | Yes | Yes | Internal | Stable key — e.g. `company_name`, `revenue_estimate` |
+| group_name | string(64) | Yes | Yes | Profile Completeness section header | e.g. `Identity`, `Funding`, `Strategic Fit` |
+| sort_order | integer | Yes | No | Internal | Global display order (0–43) |
+| label | string(128) | Yes | Yes | Profile Completeness row | e.g. `Legal entity` |
+| value | JSONB | No | Yes | Profile Completeness row | Extracted value (plain or `Valued` payload) |
+| confidence | enum (`confirmed`, `estimated`, `inferred`, `unknown`) | Yes | Yes | Profile Completeness expand | From `Valued[]` or `confirmed` for plain facts |
+| basis | text | No | Yes | Profile Completeness expand | Synthesizer rationale |
+| source_refs | JSON array | Yes | No | Profile Completeness expand | Integer indexes into `sources.local_id` |
+| coverage_status | enum (`verified`, `uncertain`, `missing`) | Yes | Yes | Profile Completeness badge | Materialized audit status |
+| created_at | timestamptz | Yes | No | Internal | |
+| updated_at | timestamptz | Yes | No | Internal | |
+
+**Unique:** `(card_id, param_key)` — one row per parameter per card.
+
+**44-parameter groups:** Identity (6) · Classification (4) · People (4) · Traction (2) · Products (4) · Distribution (3) · Business Model (1) · Financials (1) · Funding (4) · Market (3) · Brand & Sentiment (5) · Tech & IP (1) · Risk (2) · Strategic Fit (2) · Provenance (2).
+
+**Completeness % formula:** `round((verified + uncertain × 0.5) / 44 × 100)` — stored on `cards.profile_completeness_pct`.
+
+**Backfill:** `scripts/backfill_card_profile_parameters.py` for cards created before migration `0010`.
 
 ---
 
@@ -468,7 +492,8 @@ Not a table. LLM output columns:
 | -------- | ------- | ------ | ---------- | ----- |
 | Article | summary | text | No | Executive summary on results card |
 | Article | mentioned_companies | JSON array | No | Companies in this story — each item may include `company_id` |
-| Company Card | card (synthesis) | JSONB | Yes | Company detail |
+| Company Card | card (synthesis) | JSONB | Yes | Company detail brief sections |
+| Profile Completeness Parameter | `card_profile_parameters` rows | relational | Yes | Profile Completeness audit panel |
 | `engine_calls` | (audit row) | — | — | Research Evidence |
 
 ---
@@ -521,7 +546,7 @@ Visual layer on top of Part I field tables and [P1-03](./P1-03.md) (relationship
 
 **MVP:** No `organizations` or `organization_id` until multi-tenant. **Single `runs` table** — `source_kind` discriminates Run vs deep research.
 
-> §9.2 below includes **planned** tables (`article_signals`, `monitoring_rules`, etc.) for product reference. **§9.3 is the live schema** — 11 tables on GCP Cloud SQL as of 2026-06-19. Field-level detail: Part I §2–§8.
+> §9.2 below includes **planned** tables (`article_signals`, `monitoring_rules`, etc.) for product reference. **§9.3 is the live schema** — **11 tables** on GCP Cloud SQL as of 2026-06-16. Field-level detail: Part I §2–§8.
 
 ### 9.2 Master schema — all tables (reference + planned)
 
@@ -627,17 +652,14 @@ erDiagram
         uuid run_id FK
         jsonb card
         string review_status
-        int score_overall
+        int profile_completeness_pct
     }
 
-    signals {
+    card_profile_parameters {
         uuid id PK
-        uuid company_id FK
         uuid card_id FK
-        string type
-        text headline
-        int weight
-        date signal_date
+        string param_key
+        string coverage_status
     }
 
     sources {
@@ -690,12 +712,11 @@ erDiagram
 
     companies ||--o{ cards : versions
     companies ||--o| cards : canonical_card
-    companies ||--o{ signals : has
     companies ||--o{ sources : has
     companies ||--o{ watchlist_entries : watchlisted
 
-    cards ||--o{ signals : extracts
     cards ||--o{ sources : cites
+    cards ||--o{ card_profile_parameters : materializes
 
     runs ||--o{ articles : ingests
     articles ||--o{ article_signals : tags
@@ -703,7 +724,7 @@ erDiagram
     users ||--o{ watchlist_entries : promoted_by
 ```
 
-> §9.2 includes **planned** tables not in live DB. For exact FKs, ON DELETE rules, and all 11 production tables, use **§9.3**.
+> §9.2 includes **planned** tables not in live DB. For exact FKs, ON DELETE rules, and all **11** production tables, use **§9.3**.
 
 ### 9.3 Current schema (live — 11 tables)
 
@@ -792,19 +813,18 @@ erDiagram
         uuid run_id FK "nullable"
         jsonb card "CompanyCardV1"
         string review_status "draft | accepted | rejected | archived"
-        int score_overall "0-100 denorm"
+        int profile_completeness_pct "0-100 denorm"
         timestamptz created_at
     }
 
-    signals {
+    card_profile_parameters {
         uuid id PK
-        uuid company_id FK "NOT NULL"
-        uuid card_id FK "composite with company_id"
-        string type
-        text headline
-        int weight "1-10"
-        date signal_date
-        jsonb source_refs
+        uuid card_id FK "composite"
+        uuid company_id FK "composite"
+        string param_key
+        string group_name
+        string coverage_status "verified | uncertain | missing"
+        jsonb value
     }
 
     sources {
@@ -859,8 +879,8 @@ erDiagram
     articles ||--o{ companies : "source_article_id SET NULL"
     companies ||--o{ cards : "company_id CASCADE"
     companies |o--o| cards : "canonical composite FK"
-    cards ||--o{ signals : "card_id company_id composite"
     cards ||--o{ sources : "card_id company_id composite"
+    cards ||--o{ card_profile_parameters : "card_id company_id composite"
 ```
 
 #### 9.3.2 Foreign-key reference (exact behaviour)
@@ -878,10 +898,10 @@ erDiagram
 | `companies` | `source_article_id` | `articles.id` | **SET NULL** | N:1 | Web Discovery mention — one row per `(article, normalized_name)` |
 | `cards` | `company_id` | `companies.id` | **CASCADE** | N:1 | Delete company → deletes all its cards |
 | `cards` | `run_id` | `runs.id` | **SET NULL** | N:1 | Card kept if run deleted |
-| `signals` | `(card_id, company_id)` | `cards(id, company_id)` | **CASCADE** | N:1 | **Composite FK** — see §9.6 |
-| `signals` | `company_id` | `companies.id` | **CASCADE** | N:1 | Single-column FK for cascade |
 | `sources` | `(card_id, company_id)` | `cards(id, company_id)` | **CASCADE** | N:1 | **Composite FK** — see §9.6 |
 | `sources` | `company_id` | `companies.id` | **CASCADE** | N:1 | Single-column FK for cascade |
+| `card_profile_parameters` | `(card_id, company_id)` | `cards(id, company_id)` | **CASCADE** | N:1 | **Composite FK** — see §9.6 |
+| `card_profile_parameters` | `company_id` | `companies.id` | **CASCADE** | N:1 | Single-column FK for cascade |
 | `companies` | `(canonical_card_id, id)` | `cards(id, company_id)` | **SET NULL** | 1:1 optional | **Composite FK** — accepted profile pointer |
 
 **No FK row (logical only):**
@@ -902,7 +922,8 @@ erDiagram
 | `companies` | dedupe by domain | `domain` (nullable) |
 | `companies` | one mention per article + name | **`UNIQUE (source_article_id, normalized_name)`** partial — where both NOT NULL (`0009`) |
 | `runs` | idempotency | `idempotency_key` (nullable) |
-| `cards` | composite uniqueness | **`UNIQUE (id, company_id)`** — enables composite FKs on signals/sources |
+| `cards` | composite uniqueness | **`UNIQUE (id, company_id)`** — enables composite FKs on sources/profile params |
+| `card_profile_parameters` | one row per param per card | **`UNIQUE (card_id, param_key)`** (`0010`) |
 | `app_kv` | singleton keys | `key` (PK) |
 
 #### 9.3.4 `runs` polymorphism (same table, two pipelines)
@@ -910,7 +931,7 @@ erDiagram
 | `source_kind` | Typical `company_id` / `card_id` | Main outputs |
 |---------------|----------------------------------|--------------|
 | `web_discovery` | NULL / NULL on run row | `engine_outputs` JSON + `articles` ingest + enrich + **`companies` rows** (`origin=web_discovery`) |
-| `research` | `company_id` at start if passed; `card_id` on complete | Upgrades existing row or creates `companies`; writes `cards`, `signals`, `sources` |
+| `research` | `company_id` at start if passed; `card_id` on complete | Upgrades existing row or creates `companies`; writes `cards`, `sources`, **`card_profile_parameters`** |
 | `user_query` | Same as `research` | Legacy discriminator — same pipeline |
 
 #### 9.3.5 Tables in production (checklist)
@@ -922,9 +943,9 @@ erDiagram
 | 3 | `runs` | Both pipelines | Run / Deep research APIs + `web_discovery.py` / `research.py` |
 | 4 | `articles` | Web Discovery | Exa ingest + Sonnet enrich in `web_discovery.py` |
 | 5 | `companies` | Web Discovery + Deep Research | Sonnet enrich → `discovery_companies.py`; domain resolve + upgrade in `research.py` |
-| 6 | `cards` | Deep Research | Sonnet synthesis → `CompanyCardV1` JSON |
-| 7 | `signals` | Deep Research | Extracted from card synthesis |
-| 8 | `sources` | Deep Research | Citations from engine evidence |
+| 6 | `cards` | Deep Research | Sonnet synthesis → `CompanyCardV1` JSON + `profile_*` summary columns |
+| 7 | `sources` | Deep Research | Citations from engine evidence |
+| 8 | `card_profile_parameters` | Deep Research | 44 must-have profile params per card — materialized at persist |
 | 9 | `run_events` | Both pipelines | `emit()` → SSE Activity feed |
 | 10 | `engine_calls` | Both pipelines | Every Exa / Anthropic / Parallel / Diffbot call |
 | 11 | `app_kv` | Settings | `PUT /api/settings/research` (`key = research_config`) |
@@ -933,14 +954,21 @@ erDiagram
 
 **Retired (dropped in `0007_drop_today_legacy.sql`):** `trend_articles`, `discovery_clusters`.
 
+**Retired (dropped in `0011_drop_signals.sql`):** `signals` — BD signal rows no longer persisted.
+
 **Schema migration `0009_companies_web_discovery_origin.sql`:** adds `origin`, `source_article_id`, discovery columns, and `uq_companies_article_normalized_name`. Apply with **`norad_migrate`** user (not `norad_app`).
+
+**Schema migration `0010_card_profile_parameters.sql`:** adds `card_profile_parameters` table and `cards.profile_*` summary columns. Apply with **`norad_migrate`** user.
+
+**Schema migration `0011_drop_signals.sql`:** drops `signals` table. Apply with **`norad_migrate`** user.
 
 #### 9.3.6 Diagram notes
 
-1. **Composite FKs** on `companies.canonical_card_id`, `signals`, and `sources` prevent a card from one company being attached to another. Full detail: §9.6.
+1. **Composite FKs** on `companies.canonical_card_id`, `sources`, and `card_profile_parameters` prevent a card from one company being attached to another. Full detail: §9.6.
 2. **Search Results** are **not rows** — they live in `runs.engine_outputs[].results[]`. The results API **hydrates** enrich fields from `articles` when `article_id` is set.
 3. **`mentioned_companies`** is JSONB for the results UI **and** mirrored to **`companies` rows** with FK `source_article_id`. Each JSON object includes `company_id` after enrich. Deep Research can pass that id to upgrade the same row (`origin` → `research` on complete).
-4. **`cards.card`** is the full `CompanyCardV1` document; denormalized `score_*` columns exist for list sort without parsing JSON.
+4. **`cards.card`** is the full `CompanyCardV1` document; denormalized `score_*` columns are **legacy** (NULL on new cards); `profile_*` columns power completeness summary without parsing JSON.
+5. **`card_profile_parameters`** materializes the 44 must-have audit rows per card — `GET /api/research/companies/:id/profile-completeness` serves grouped params + summary.
 
 ### 9.4 Diagram by product area
 
@@ -981,8 +1009,8 @@ flowchart TB
     RUNS[(runs source_kind=research)]
     CO[companies]
     CARD[cards]
-    SIG[signals]
     SRC[sources]
+    CPP[card_profile_parameters]
     EV[run_events]
     EC[engine_calls]
 
@@ -990,8 +1018,8 @@ flowchart TB
     RUNS -->|run_id| CARD
     CARD -->|company_id CASCADE| CO
     CO -->|canonical_card_id| CARD
-    CARD --> SIG
     CARD --> SRC
+    CARD --> CPP
     RUNS --> EV
     RUNS --> EC
 
@@ -1070,7 +1098,7 @@ flowchart LR
 |---------------|------------------------|
 | Pending Review | `cards.review_status = 'draft'` joined to `companies` |
 | Watchlist | `companies.is_watchlisted` or `watchlist_entries` |
-| Opportunity | Weekly query over `articles` + `signals` + `monitoring_rules` |
+| Opportunity | Weekly query over `articles` + `monitoring_rules` |
 | Operator deep research trigger | `INSERT INTO runs (source_kind='research', engines→provenance)` |
 
 ### 9.5 `runs` polymorphism
@@ -1088,7 +1116,7 @@ flowchart TD
     WD --> OUT1[engine_outputs → Search Results]
     WD --> OUT2[ingest → articles → companies web_discovery]
 
-    RS --> OUT3[upgrade companies + cards + signals + sources]
+    RS --> OUT3[upgrade companies + cards + sources + card_profile_parameters]
     UQ --> OUT3
 ```
 
@@ -1100,7 +1128,7 @@ flowchart TD
 
 ### 9.6 Composite foreign keys (detail)
 
-`cards` has **`UNIQUE (id, company_id)`**. Child tables reference **both** columns so a signal/source cannot point at another company's card.
+`cards` has **`UNIQUE (id, company_id)`**. Child tables reference **both** columns so a source/profile row cannot point at another company's card.
 
 ```mermaid
 erDiagram
@@ -1115,13 +1143,6 @@ erDiagram
         jsonb card
         string review_status
     }
-    signals {
-        uuid id PK
-        uuid card_id "composite"
-        uuid company_id "composite"
-        string type
-        text headline
-    }
     sources {
         uuid id PK
         uuid card_id "composite"
@@ -1129,21 +1150,28 @@ erDiagram
         int local_id
         text url
     }
+    card_profile_parameters {
+        uuid id PK
+        uuid card_id "composite"
+        uuid company_id "composite"
+        string param_key
+        string coverage_status
+    }
 
     companies ||--o{ cards : "company_id ON DELETE CASCADE"
     companies |o--o| cards : "FK canonical_card_id id to cards id company_id SET NULL"
-    cards ||--o{ signals : "FK card_id company_id to cards id company_id CASCADE"
     cards ||--o{ sources : "FK card_id company_id to cards id company_id CASCADE"
+    cards ||--o{ card_profile_parameters : "FK card_id company_id to cards id company_id CASCADE"
 ```
 
 | Constraint | SQL shape | Prevents |
 |------------|-----------|----------|
 | Card belongs to company | `cards.company_id` → `companies.id` | Orphan cards |
 | Canonical card integrity | `(companies.canonical_card_id, companies.id)` → `cards(id, company_id)` | Company pointing at another company's card |
-| Signal integrity | `(signals.card_id, signals.company_id)` → `cards(id, company_id)` | Signal on wrong company's card |
 | Source integrity | `(sources.card_id, sources.company_id)` → `cards(id, company_id)` | Citation on wrong company's card |
+| Profile param integrity | `(card_profile_parameters.card_id, card_profile_parameters.company_id)` → `cards(id, company_id)` | Completeness row on wrong company's card |
 
-**ORM:** `apps/api/app/models/card.py` (`UniqueConstraint id, company_id`) · `company.py` (`fk_companies_canonical_card`) · `signal.py` / `source.py` (`ForeignKeyConstraint` on both columns).
+**ORM:** `apps/api/app/models/card.py` (`UniqueConstraint id, company_id`) · `company.py` (`fk_companies_canonical_card`) · `source.py` / `card_profile_parameter.py` (`ForeignKeyConstraint` on both columns).
 
 ### 9.7 JSON embeds (not separate tables)
 
@@ -1151,7 +1179,8 @@ erDiagram
 |----------|----------|---------------|
 | `runs.engine_outputs` | Per-query Exa results, Search Result objects | Optional `search_results` |
 | `runs.engines` | Run config + cluster/query provenance | Optional dedicated FK columns |
-| `cards.card` | Full `CompanyCardV1` — see `apps/api/app/schemas/` | Stay JSONB |
+| `cards.card` | Full `CompanyCardV1` — see `apps/api/app/schemas/` | Stay JSONB — source of truth for synthesis |
+| `card_profile_parameters` | 44 must-have params + `coverage_status` per card | **Live table** — queryable audit index |
 | `articles.mentioned_companies` | Companies in story + `company_id` per item | JSON kept for hydration; relational rows in `companies` |
 | `app_kv.value` | `research_config` | Stay KV |
 
@@ -1175,6 +1204,7 @@ flowchart LR
         ART[(articles)]
         C[(companies)]
         K[(cards)]
+        P[(card_profile_parameters)]
     end
 
     A1 --> A2 --> R
@@ -1184,6 +1214,7 @@ flowchart LR
     A3 --> A4 --> R
     A4 --> C
     R --> K
+    K --> P
     K --> B1
     C --> B2
     C --> B1
@@ -1206,7 +1237,8 @@ Analysts use the **same app and Postgres schema**. They read enriched Web Discov
 |--------|---------------------------|
 | Cluster, Query, Run | Not configured in analyst journey — operator routes |
 | Article, result card | Read on query results page |
-| Company, Company Profile, Company Signal | Read on `/companies` — **Profiles** tab (research feed) and **Discovered** tab (Web Discovery mentions) |
+| Company, Company Profile | Read on `/companies` — **Profiles** tab (research feed) and **Discovered** tab (Web Discovery mentions) |
+| Profile Completeness Parameter | Read on company detail — `GET /api/research/companies/:id/profile-completeness` |
 | Pending Review, Watchlist, News Signal | **Phase 2** — see §8.2, §3.6 |
 
 ---
@@ -1221,6 +1253,8 @@ Analysts use the **same app and Postgres schema**. They read enriched Web Discov
 | Part I — News Signal marked Phase 2 (§3.6) |
 | Part II — database schema diagrams (§9) |
 | Migration `0009` — companies ↔ articles FK documented (§9.3) |
+| Migration `0010` — `card_profile_parameters` + `cards.profile_*` documented (§4.6, §9.3) |
+| Migration `0011` — `signals` table dropped (§4.4, §9.3) |
 | Single-app analyst consumption (§10) |
 | CompanyCardV1 JSON deferred to `apps/api/app/schemas/` |
 | `organization_id` omitted per MVP decision |
@@ -1232,5 +1266,5 @@ Analysts use the **same app and Postgres schema**. They read enriched Web Discov
 
 | Role | Name | Date |
 | ------ | ------ | ------ |
-| Author | Huzaifa | 2026-06-19 |
+| Author | Huzaifa | 2026-06-16 |
 | Reviewer | Shehrayar Haq | — |

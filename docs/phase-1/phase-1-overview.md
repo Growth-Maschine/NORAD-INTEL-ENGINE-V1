@@ -4,8 +4,8 @@
 |-------|-------|
 | **Document ref** | P1-00 |
 | **Title** | Phase 1 Overview — controlling specification |
-| **Version** | 1.0 |
-| **Last updated** | 2026-06-19 |
+| **Version** | 1.2 |
+| **Last updated** | 2026-06-16 |
 | **Status** | Active — source of truth for what is **built today** |
 
 ---
@@ -46,7 +46,7 @@ There is **one web app** (`apps/web`) and **one API** (`apps/api`). There is no 
 | Research run log | `/runs/:id` | `GET /api/research/runs/:id`, SSE `/api/events/runs/:id` |
 | Companies feed | `/companies` (Profiles tab) | `GET /api/research/feed` |
 | Discovered companies | `/companies` (Discovered tab) | `GET /api/research/discovered` |
-| Company profile | `/companies/:id` | `GET /api/research/companies/:id`, evidence API |
+| Company profile | `/companies/:id` | `GET /api/research/companies/:id`, evidence API, **`GET .../profile-completeness`** |
 | Settings | `/settings` | `GET/PUT /api/settings/research`, `GET /health/db` |
 
 **Pipelines (both run in the API process via `asyncio.create_task` — no separate worker):**
@@ -67,7 +67,8 @@ There is **one web app** (`apps/web`) and **one API** (`apps/api`). There is no 
 | `run_events` | Append-only timeline (powers SSE Activity feeds) |
 | `engine_calls` | Per-vendor request/response audit (cost, latency, JSONB payloads) |
 | `companies` | Web Discovery mentions (`origin=web_discovery`) **and** Deep Research profiles (`origin=research`) |
-| `cards`, `signals`, `sources` | Deep research output (linked via `companies.canonical_card_id`) |
+| `cards`, `sources` | Deep research output (linked via `companies.canonical_card_id`) |
+| `card_profile_parameters` | 44 must-have profile completeness rows per card — materialized at persist |
 | `app_kv` | Research engine settings (`research_config`) |
 
 **Database:** GCP Cloud SQL Postgres (`GCP_DATABASE_URL*`). Not Supabase.
@@ -90,6 +91,8 @@ There is **one web app** (`apps/web`) and **one API** (`apps/api`). There is no 
 | **`discovery_clusters` table** (legacy) | Old Today taxonomy; dropped in 0007 |
 | **TrendHunter category picker** | `categories.py` removed |
 | **arq background worker** | Pipelines run in-process; `Procfile` is API-only |
+| **`signals` table** | Dropped in `sql/0011_drop_signals.sql` — BD signals/scores not persisted |
+| **Fit scores / recommended actions in synthesis** | Stripped from Deep Research — future frontend owns BD layer |
 | **`GET /brands`** | Placeholder removed |
 | **Analyst-only app** | Single app serves operator workflows |
 
@@ -144,8 +147,8 @@ Typical entry from Web Discovery or **Companies → Discovered**: **Deep researc
 |-------|---------|--------|
 | 1 — Input | App | Company name, optional domain hint |
 | 2 — Fan-out | Parallel + Exa + Diffbot (partial failure tolerated) | Structured brief + web content + entity graph |
-| 3 — Synthesize | Claude Sonnet | `CompanyCardV1` JSON + signals |
-| 4 — Persist | App | `companies`, `cards`, `signals`, `sources` |
+| 3 — Synthesize | Claude Sonnet | `CompanyCardV1` fact blocks + `sources_and_confidence` (+ optional `strategic_fit.fit_summary`) |
+| 4 — Persist | App | `companies`, `cards`, `sources`, `card_profile_parameters` |
 
 Settings (`/settings`) affect **research only** — Parallel processor, Exa search type, Diffbot toggle/threshold. Stored in `app_kv.research_config`.
 
@@ -178,16 +181,16 @@ Documents are maintained in order. **P1-00 (this file) is authoritative for scop
 
 | Ref | File | Subject | Status |
 |-----|------|---------|--------|
-| **P1-00** | [phase-1-overview.md](./phase-1-overview.md) | Controlling overview | **v1.0 — this document** |
-| P1-01-Admin | [P1-01-admin.md](./P1-01-admin.md) | Operator workflows | v3.0 — revised 2026-06-19 |
-| P1-01-User | [P1-01-user.md](./P1-01-user.md) | Analyst workflows (same app) | v2.0 — revised 2026-06-19 |
-| P1-02-Admin | [P1-02-admin.md](./P1-02-admin.md) | Operator product objects | v2.0 — revised 2026-06-19 |
-| P1-02-User | [P1-02-user.md](./P1-02-user.md) | Analyst product objects | v2.0 — revised 2026-06-19 |
-| P1-03 | [P1-03.md](./P1-03.md) | Object relationships | v2.0 — revised 2026-06-19 |
-| P1-04-Admin | [P1-04-admin.md](./P1-04-admin.md) | Required fields | v3.1 — migration `0009` companies ↔ articles |
-| P1-05-Admin | [P1-05-admin.md](./P1-05-admin.md) | Operator UI mapping | v2.0 — revised 2026-06-19 |
-| P1-05-User | [P1-05-user.md](./P1-05-user.md) | Analyst UI mapping | v2.0 — revised 2026-06-19 |
-| P1-06 | [P1-06.md](./P1-06.md) | Backend actions | v2.0 — revised 2026-06-19 |
+| **P1-00** | [phase-1-overview.md](./phase-1-overview.md) | Controlling overview | **v1.2 — this document** |
+| P1-01-Admin | [P1-01-admin.md](./P1-01-admin.md) | Operator workflows | v3.1 — revised 2026-06-16 |
+| P1-01-User | [P1-01-user.md](./P1-01-user.md) | Analyst workflows (same app) | v2.1 — revised 2026-06-16 |
+| P1-02-Admin | [P1-02-admin.md](./P1-02-admin.md) | Operator product objects | v2.1 — revised 2026-06-16 |
+| P1-02-User | [P1-02-user.md](./P1-02-user.md) | Analyst product objects | v2.1 — revised 2026-06-16 |
+| P1-03 | [P1-03.md](./P1-03.md) | Object relationships | v2.1 — revised 2026-06-16 |
+| P1-04-Admin | [P1-04-admin.md](./P1-04-admin.md) | Required fields | v3.2 — migrations `0009`–`0011`; 11 live tables |
+| P1-05-Admin | [P1-05-admin.md](./P1-05-admin.md) | Operator UI mapping | v2.1 — revised 2026-06-16 |
+| P1-05-User | [P1-05-user.md](./P1-05-user.md) | Analyst UI mapping | v2.1 — revised 2026-06-16 |
+| P1-06 | [P1-06.md](./P1-06.md) | Backend actions | v2.1 — revised 2026-06-16 |
 | — | [phase2test.md](./phase2test.md) | SQL acceptance tests | Legacy — includes Phase 2 tables (`article_signals`, watchlist) not in current repo; use with P1-04 §3.6 |
 
 **Revision order (agreed):** P1-00 → P1-01-Admin + P1-01-User (paired) → P1-02 → … → P1-06.
@@ -210,7 +213,8 @@ When verifying behaviour, use these files first:
 | Research orchestration | `apps/api/app/services/research.py` |
 | Research HTTP | `apps/api/app/routers/research.py` |
 | ORM models | `apps/api/app/models/` |
-| DDL | `apps/api/sql/` (apply with `psql "$GCP_DATABASE_URL_POOL" -f …`) |
+| DDL | `apps/api/sql/` (apply with `GCP_DATABASE_URL_POOL` via `psql` or SQLAlchemy/psycopg) |
+| Legacy signals/scores reference | `docs/reference/legacy-signals-scores-suggestions.md` |
 | Pipeline field guide | `docs/backend-pipeline.md` |
 
 ---

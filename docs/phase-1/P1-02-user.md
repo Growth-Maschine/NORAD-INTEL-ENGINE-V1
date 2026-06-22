@@ -4,8 +4,8 @@
 |-------|-------|
 | **Document ref** | P1-02-User |
 | **Title** | Core Product Objects — Analyst perspective |
-| **Version** | 2.0 |
-| **Last updated** | 2026-06-19 |
+| **Version** | 2.1 |
+| **Last updated** | 2026-06-16 |
 | **Audience** | Stakeholders, product, analysts |
 | **Controlling doc** | [P1-00 Overview](./phase-1-overview.md) |
 | **Paired doc** | [P1-02-Admin](./P1-02-admin.md) — same persisted rows, operator labels |
@@ -15,7 +15,7 @@
 
 ## 1. Introduction
 
-NORAD turns web search hits into structured intelligence — enriched articles, company profiles, and evidence-backed signals. Before anyone extends the product, the team needs a shared vocabulary for the **objects** an analyst actually encounters in the app today.
+NORAD turns web search hits into structured intelligence — enriched articles and company profiles. Before anyone extends the product, the team needs a shared vocabulary for the **objects** an analyst actually encounters in the app today.
 
 This document names and defines each one from the **analyst reading perspective**: what it is, why it matters, where it appears, and a realistic example. It is the companion to [P1-01-User](./P1-01-user.md) — workflows describe *what the user does*; this document describes *what the things are*.
 
@@ -42,7 +42,6 @@ NORAD is **one application**. There is no separate analyst-only frontend. Operat
 | **Executive summary** | Sonnet-written paragraph — not Exa's vendor summary |
 | **Companies in this story** | `mentioned_companies` from Sonnet enrich |
 | **Company Profile** | Analyst label for a **Company Card** (`cards` row) |
-| **Company Signal** | Analyst label for a **Research Signal** (`signals` row) |
 | **Deep research** | User action starting a Deep Research Run |
 
 ### 1.2 Section pairing (User ↔ Admin)
@@ -50,7 +49,7 @@ NORAD is **one application**. There is no separate analyst-only frontend. Operat
 | Topic | This doc (Analyst) | [P1-02-Admin](./P1-02-admin.md) |
 |-------|-------------------|--------------------------------|
 | Enriched story | Article, result card | Article, Search Result |
-| Company intelligence | Company Profile, Company Signal | Company Card, Research Signal |
+| Company intelligence | Company Profile | Company Card |
 | Research run | Deep Research Run outcome | Deep Research Run |
 | Configuration | — | Cluster, Query, Research Config |
 
@@ -68,7 +67,7 @@ NORAD is **one application**. There is no separate analyst-only frontend. Operat
 | Pipeline | LLM role | What the analyst sees |
 |----------|----------|----------------------|
 | Web Discovery enrich | Summarise + extract companies per new article | Executive summary, Companies in this story, **Analyzed** badge |
-| Deep research | Synthesise `CompanyCardV1` + signals | Company Profile sections, Signal Analysis, Research Evidence |
+| Deep research | Synthesise `CompanyCardV1` fact blocks | Company Profile sections, Research Evidence, Profile Completeness |
 
 ---
 
@@ -82,8 +81,7 @@ NORAD is **one application**. There is no separate analyst-only frontend. Operat
 | 3.4 | Web Discovery result card | One URL hit as shown on the results page |
 | 3.5 | Company | A business entity NORAD has researched or can research |
 | 3.6 | Company Profile | Deep-research output for one company (one card version) |
-| 3.7 | Company Signal | Timeline event on a Company Profile |
-| 3.8 | Deep research action | Analyst choice to run full company profiling |
+| 3.7 | Deep research action | Analyst choice to run full company profiling |
 
 ---
 
@@ -153,23 +151,27 @@ When no executive summary exists (thin content or enrich failure), the card fall
 
 | | |
 |--|--|
-| **What** | The structured deep-research output for one company — facts, scores, narrative, signals, sources |
+| **What** | The structured deep-research output for one company — facts, narrative, sources |
 | **Why** | Single place to evaluate strategic fit and evidence quality |
-| **Example** | Ultra Pouches profile — founded May 2025, CEO Eric Drymer, strategic fit scores, Signal Analysis timeline |
-| **Where in UI** | `/companies/:id` — Overview, Signals, People, Financials, Research Evidence |
-| **Backend** | `cards` row — same data as operator **Company Card** |
+| **Example** | Ultra Pouches profile — founded May 2025, CEO Eric Drymer, strategic fit narrative |
+| **Where in UI** | `/companies/:id` — facts, Strategic Fit, Sources, Research Evidence, Profile Completeness |
+| **Backend** | `cards` row — same data as operator **Company Card**; **Profile Completeness** from `card_profile_parameters` via `GET /api/research/companies/:id/profile-completeness` |
 
 `companies.canonical_card_id` points at the accepted profile when set. Multiple card versions exist per company (one per Deep Research Run).
 
-### 6.3 Company Signal
+### 6.2.1 Profile completeness audit
 
 | | |
 |--|--|
-| **What** | One identified event on a Company Profile — funding, product launch, partnership |
-| **Why** | Evidence-backed timeline for BD qualification |
-| **Example** | “$11M Series A (Jan 2026)” — GROWTH type with source refs |
-| **Where in UI** | Company detail → Overview Signal Analysis; Signals tab |
-| **Backend** | `signals` — same data as operator **Research Signal** |
+| **What** | 44 must-have parameters with verified / uncertain / missing status and completeness % |
+| **Why** | Shows which NORAD contract fields are populated vs missing — evidence audit |
+| **Example** | Identity group — company name VERIFIED, revenue estimate UNCERTAIN, social growth MISSING |
+| **Where in UI** | Company detail → Profile Completeness panel (bottom of page) |
+| **Backend** | `card_profile_parameters` — 44 rows per card; summary on `cards.profile_completeness_pct` |
+
+### 6.3 Company Signal — RETIRED
+
+**Dropped 2026-06-16.** Table `signals` removed. BD signal timeline moves to a future frontend. Legacy: `docs/reference/legacy-signals-scores-suggestions.md`.
 
 ---
 
@@ -214,8 +216,8 @@ When these ship, relationships will extend [P1-03](./P1-03.md) §11.
 | Article | Enriched web story | Lumina Series B summary |
 | Web Discovery result card | One URL on results page | Analyzed card with companies |
 | Company | Business entity | Ultra Pouches |
-| Company Profile | Deep research card | Overview + Signals tabs |
-| Company Signal | Event on profile timeline | Series A GROWTH |
+| Company Profile | Deep research card | Facts + strategic fit + sources |
+| Company Signal | **Retired** | — |
 | Deep research action | Start profiling run | Deep research button |
 | AI Analysis | LLM step in pipeline | Sonnet summary on card |
 
@@ -231,7 +233,7 @@ flowchart LR
     DR --> DRR[Deep Research Run]
     DRR --> CO[Company]
     DRR --> CP[Company Profile]
-    CP --> CS[Company Signal]
+    CP --> SRC[Sources]
 ```
 
 | From | To | How |
@@ -239,7 +241,7 @@ flowchart LR
 | Web Discovery Run | Article | New URLs ingested; duplicates reuse existing row |
 | Article | Result card | Results API hydrates summary, companies, body onto each hit |
 | Result card | Deep Research Run | Analyst clicks **Deep research** on a mentioned company |
-| Deep Research Run | Company Profile | Synthesis persists `cards` + `signals` + `sources` |
+| Deep Research Run | Company Profile | Synthesis persists `cards` + `sources` + `card_profile_parameters` |
 | Company | Company Profile | One company → many card versions; `canonical_card_id` when accepted |
 
 Full relationship spec: [P1-03](./P1-03.md).

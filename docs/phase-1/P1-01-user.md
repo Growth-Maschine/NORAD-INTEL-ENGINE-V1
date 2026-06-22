@@ -4,8 +4,8 @@
 |-------|-------|
 | **Document ref** | P1-01-User |
 | **Title** | Core Analyst Workflow |
-| **Version** | 2.0 |
-| **Last updated** | 2026-06-19 |
+| **Version** | 2.1 |
+| **Last updated** | 2026-06-16 |
 | **Audience** | Stakeholders, product, analysts |
 | **Controlling doc** | [P1-00 Overview](./phase-1-overview.md) |
 | **Paired doc** | [P1-01-Admin](./P1-01-admin.md) — same app, operator configure/run journey |
@@ -181,7 +181,7 @@ Deep research is the expensive pipeline: Parallel + Exa + Diffbot evidence → C
 
 **Behind the scenes:**
 
-**Pipeline:** `POST /api/research/runs` → Stages 1–4 (see §3.4) → `companies` + `cards` + `signals` + `sources`
+**Pipeline:** `POST /api/research/runs` → Stages 1–4 (see §3.4) → `companies` + `cards` + `sources` + `card_profile_parameters`
 
 There is **no** **+ ADD**, **Escalate**, or **Pending review** queue in the current app. Research starts immediately on button click.
 
@@ -224,9 +224,8 @@ There is **no** **+ ADD**, **Escalate**, or **Pending review** queue in the curr
 | **2 — Fan-out** | **Parallel** | Structured research brief |
 | **2 — Fan-out** | **Exa** | Deep web search + page contents |
 | **2 — Fan-out** | **Diffbot** | Knowledge-graph entity record |
-| **3 — Synthesize** | **Claude Sonnet** | Merges evidence into `CompanyCardV1` + signals |
-| **3 — Retry** | **Claude Sonnet** | One automatic retry if signals too thin |
-| **4 — Persist** | Application | Saves company, card, signals, sources |
+| **3 — Synthesize** | **Claude Sonnet** | Merges evidence into `CompanyCardV1` fact blocks + sources |
+| **4 — Persist** | Application | Saves company, card, sources, profile completeness rows |
 
 Stage 2 tolerates partial engine failure. All three failing stops the run with no saved card.
 
@@ -271,7 +270,7 @@ flowchart TD
 | **Company row** | Click to expand | Navigate | Collapsed: name, status, score, run count |
 | **Status** | Read | Read | **Profiling…** (live), **Done**, `failed`, `cancelled` |
 | **Strategic fit excerpt** | Read | Read | Summary + recommendation when expanded |
-| **Top signals** | Read | Read | First signals from card |
+| **Strategic fit excerpt** | Read | Read | From expanded row when card exists |
 | **View run log →** | Click | Navigate | `/runs/:id` |
 | **Open full page →** | Click | Navigate | `/companies/:id` |
 | **Cancel run** | Click (live only) | Cancel | Stops pipeline at next checkpoint |
@@ -296,25 +295,24 @@ flowchart TD
 
 ### 4.3 Company profile (`/companies/:id`)
 
-**What the user is trying to do:** Read the full deep-research output — strategic fit, signals, sources, engine evidence.
+**What the user is trying to do:** Read the full deep-research output — strategic fit, sources, profile completeness, engine evidence.
 
 | Component | User action | Action type | What the user sees |
 |-----------|-------------|-------------|-------------------|
-| **Header** | Read | Read | Name, domain, fit badge, score breakdown |
+| **Header** | Read | Read | Name, domain, confidence pills |
 | **Key facts** | Read | Read | Classification, financials, team groupings |
-| **Strategic fit** | Read | Read | Narrative + recommended action |
-| **Signals** | Read | Read | Signal list with evidence |
+| **Strategic fit** | Read | Read | Narrative summary |
 | **Sources** | Read | Read | Cited URLs |
 | **Research evidence** | Expand tabs | Read | Parallel / Exa / Diffbot / synthesis I/O |
-| **Must-have coverage** | Read | Read | Which card blocks are populated |
+| **Must-have coverage** | Read | Read | 44-parameter audit — verified / uncertain / missing | `GET /api/research/companies/:id/profile-completeness` → `card_profile_parameters` |
 | **Profile history** | Click run | Navigate | Past `/runs/:id` entries |
 | **Follow / Share / Signal alert** | Click | — | **UI shell only** — no handler |
 
 **Behind the scenes:**
 
-**Pipeline:** `GET /api/research/companies/:id` returns `CompanyCardV1` JSON plus denormalized `signals` and `sources`.
+**Pipeline:** `GET /api/research/companies/:id` returns `CompanyCardV1` JSON plus denormalized `sources`. **Profile Completeness** loads separately via `GET /api/research/companies/:id/profile-completeness` (44 materialized rows from `card_profile_parameters`).
 
-The profile is a **single scrollable page** (not separate Overview / People / Financials tabs). Content comes from `CompanyBriefSections`, `ResearchEvidence`, and `MustHaveCoverage` components.
+The profile is a **single scrollable page** (not separate Overview / People / Financials tabs). Content comes from `CompanyBriefSections`, `ResearchEvidence`, and `MustHaveCoverage` (API-driven).
 
 **Flow:**
 
@@ -328,7 +326,7 @@ The profile is a **single scrollable page** (not separate Overview / People / Fi
 flowchart TD
     START([Companies page]) --> FEED[Company feed + Activity panel]
     FEED --> EXPAND{Expand row?}
-    EXPAND -->|Yes| EXCERPT[Strategic fit + top signals]
+    EXPAND -->|Yes| EXCERPT[Strategic fit excerpt]
     EXPAND -->|Open full page| PROFILE[Company profile]
     EXCERPT --> RUNLOG[View run log]
     EXCERPT --> PROFILE
@@ -448,7 +446,7 @@ flowchart TD
         CO --> DR[Deep research click]
         DR --> ST2[Parallel + Exa + Diffbot]
         ST2 --> ST3[Claude Sonnet · CompanyCardV1]
-        ST3 --> SAVE[companies / cards / signals]
+        ST3 --> SAVE[companies / cards / sources / card_profile_parameters]
     end
 
     SAVE --> PROF[Company profile]

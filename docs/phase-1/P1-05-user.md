@@ -144,13 +144,13 @@ Legacy drafts also described Home/News, Pending review, Watchlist — **not in t
 
 | Attribute | Value |
 |-----------|-------|
-| **Purpose** | Full Company Profile — scores, signals, evidence |
+| **Purpose** | Full Company Profile — facts, sources, profile completeness, evidence |
 
-**Objects:** Company, Company Profile, Company Signal, Source, Engine Call (evidence)
+**Objects:** Company, Company Profile, Source, Profile Completeness Parameter, Engine Call (evidence)
 
 | Control | Action type | Effect |
 |---------|-------------|--------|
-| Overview / Signals / People / Financials tabs | Navigate | Profile sections |
+| Profile sections | Navigate | Facts, strategic fit, sources, completeness audit |
 | Research Evidence | Read | Engine calls + sources |
 | Run history | Read | Past Deep Research runs |
 | Breadcrumb | Navigate | Back to `/companies` |
@@ -221,7 +221,7 @@ flowchart TB
 | Web Discovery result card | Web Discovery results |
 | Company | Results (mentioned), Companies feed, profile |
 | Company Profile | Company profile |
-| Company Signal | Company profile |
+| Company Profile | Company profile |
 | Deep Research Run | Run log, Companies feed status |
 | Research Config | Settings |
 

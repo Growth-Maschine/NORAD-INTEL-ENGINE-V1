@@ -1,5 +1,7 @@
 # Phase 2 — GCP Database Schema Verification
 
+> **2026-06-16 update:** The live Phase 1 schema has **11 tables** — the research `signals` table was **dropped** (`0011_drop_signals.sql`). Scenarios below that reference `signals`, composite FKs on `signals`, or 49 profile-completeness params are **legacy** — use [P1-04-admin.md §9.3](./P1-04-admin.md#93-current-schema-live--11-tables) as the current checklist. Profile completeness is **44 parameters** per card.
+
 
 | Field                      | Value                                                                            |
 | -------------------------- | -------------------------------------------------------------------------------- |
