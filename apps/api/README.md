@@ -39,7 +39,11 @@ app/
 ├── services/            # research, web_discovery, run_events, settings
 └── utils/
 sql/                     # Versioned DDL — apply with psql
-scripts/dev.py           # Local uvicorn launcher
+scripts/
+├── dev.py               # Local uvicorn launcher
+├── dev_port.py          # Port picker (used by dev.py)
+└── backfill_card_profile_parameters.py
 ```
 
-DDL workflow: see `docs/backend-pipeline.md` and `apps/api/sql/`.
+DDL workflow: see `docs/backend-pipeline.md` and `apps/api/sql/`.  
+GCP ops: see `ops/gcp-migration/README.md`.

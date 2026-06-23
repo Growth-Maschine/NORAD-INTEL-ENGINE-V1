@@ -71,7 +71,7 @@ so you don't need to set `VITE_API_URL` locally.
 
 Database is **Cloud SQL Postgres** in GCP (`norad-498414`, `europe-west2`, instance `norad-pg-prod`).
 Schema is applied manually — see
-[`scripts/gcp-migration/README.md`](../scripts/gcp-migration/README.md) and
+[`ops/gcp-migration/README.md`](../ops/gcp-migration/README.md) and
 `apps/api/sql/` for incremental DDL.
 
 ---

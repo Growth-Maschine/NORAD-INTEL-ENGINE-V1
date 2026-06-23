@@ -3,6 +3,7 @@
 Admin API for multi-tenant org management. Powers the new admin UI (`/dashboard/organizations`).
 
 **Auth:** All `/api/admin/organizations/*` routes require `X-Admin-Token` when `DEBUG=false`.  
+**Actor attribution:** Optional header `X-Actor-Label: you@growthmaschine.com` on write routes — stored as `created_by`, `invited_by`, `assigned_by`, etc. Defaults to `admin` when omitted.  
 **Audience:** Growth Maschine staff only — not customer admins.
 
 ---
@@ -19,6 +20,19 @@ Admin API for multi-tenant org management. Powers the new admin UI (`/dashboard/
 | `organization_clusters` | M2M org ↔ `web_discovery_clusters` |
 | `organization_companies` | Org ↔ `companies` — **exclusive** (`company_id` unique) |
 | `organization_audit_events` | Activity tab / audit trail |
+
+### Actor fields (who did what)
+
+| Table | Fields |
+|-------|--------|
+| `organizations` | `created_by`, `updated_by` |
+| `organization_members` | `created_by`, `updated_by`, `deactivated_by` |
+| `organization_invites` | `invited_by` |
+| `organization_api_keys` | `created_by`, `revoked_by` |
+| `organization_auth_config` | `updated_by` |
+| `organization_clusters` | `assigned_by` |
+| `organization_companies` | `assigned_by` |
+| `organization_audit_events` | `actor_label` (same value as `X-Actor-Label`) |
 
 ### Scoping rules
 

@@ -28,6 +28,8 @@ class OrganizationListItem(BaseModel):
     is_provisioning: bool
     cluster_access: list[ClusterAccessRef]
     user_count: int
+    created_by: str
+    updated_by: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -66,6 +68,8 @@ class OrganizationRef(BaseModel):
     status: OrgStatus
     display_status: DisplayStatus
     is_provisioning: bool
+    created_by: str
+    updated_by: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -120,6 +124,7 @@ class ClusterAssignmentOut(BaseModel):
     name: str
     slug: str
     assigned_at: datetime | None = None
+    assigned_by: str | None = None
 
 
 class CompanyAssignmentOut(BaseModel):
@@ -127,6 +132,7 @@ class CompanyAssignmentOut(BaseModel):
     company_name: str
     domain: str | None
     assigned_at: datetime | None = None
+    assigned_by: str | None = None
 
 
 class AssignClusterIn(BaseModel):
@@ -145,7 +151,10 @@ class MemberOut(BaseModel):
     team: str | None
     status: MemberStatus
     joined_at: datetime
+    created_by: str
+    updated_by: str | None = None
     deactivated_at: datetime | None = None
+    deactivated_by: str | None = None
 
 
 class InviteOut(BaseModel):
@@ -155,6 +164,7 @@ class InviteOut(BaseModel):
     role: MemberRole
     team: str | None
     status: InviteStatus
+    invited_by: str
     expires_at: datetime
     sent_at: datetime | None
     accepted_at: datetime | None
@@ -190,6 +200,7 @@ class IntegrationKeyOut(BaseModel):
     id: uuid.UUID
     key_prefix: str
     is_active: bool
+    created_by: str
     expires_at: datetime | None
     last_used_at: datetime | None
     created_at: datetime

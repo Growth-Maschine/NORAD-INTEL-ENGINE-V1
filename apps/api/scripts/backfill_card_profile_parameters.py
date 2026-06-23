@@ -1,8 +1,8 @@
 """Backfill ``card_profile_parameters`` for existing cards.
 
-Usage (from repo root):
+Usage:
   cd apps/api && CORS_ORIGINS='["http://localhost:5173"]' \
-    .venv/bin/python ../../scripts/backfill_card_profile_parameters.py
+    .venv/bin/python scripts/backfill_card_profile_parameters.py
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-API_ROOT = Path(__file__).resolve().parents[1] / "apps" / "api"
+API_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(API_ROOT))
 
 from sqlalchemy import select  # noqa: E402

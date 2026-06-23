@@ -17,7 +17,7 @@ gcloud sql instances patch norad-pg-prod \
 ## 2. Generate env vars
 
 ```bash
-cd scripts/gcp-migration
+cd ops/gcp-migration
 cp config.env.example config.env   # set GCP_PROJECT if needed
 ./05-print-railway-env.sh
 ```

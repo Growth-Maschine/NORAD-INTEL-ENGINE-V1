@@ -9,6 +9,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.admin_auth import DEFAULT_ADMIN_ACTOR
 from app.models.company import Company
 from app.models.organization import (
     ACTIVE_RUN_STATUSES,
@@ -56,7 +57,7 @@ async def record_audit(
     event_type: str,
     title: str,
     description: str | None = None,
-    actor_label: str = "admin",
+    actor_label: str = DEFAULT_ADMIN_ACTOR,
     metadata: dict[str, Any] | None = None,
 ) -> OrganizationAuditEvent:
     row = OrganizationAuditEvent(
@@ -146,6 +147,7 @@ async def create_organization(
     name: str,
     domain: str,
     status: str = "active",
+    actor_label: str = DEFAULT_ADMIN_ACTOR,
 ) -> tuple[Organization, str]:
     """Create org with default auth config and integration key. Returns org + plaintext key."""
     if status not in ORGANIZATION_STATUSES:
@@ -160,7 +162,12 @@ async def create_organization(
     except ValueError as exc:
         raise OrganizationError(str(exc), code="validation_error") from exc
 
-    org = Organization(name=clean_name, domain=clean_domain, status=status)
+    org = Organization(
+        name=clean_name,
+        domain=clean_domain,
+        status=status,
+        created_by=actor_label,
+    )
     session.add(org)
     await session.flush()
 
@@ -172,6 +179,7 @@ async def create_organization(
             organization_id=org.id,
             key_prefix=key_prefix,
             key_hash=key_hash,
+            created_by=actor_label,
         )
     )
 
@@ -181,6 +189,7 @@ async def create_organization(
         event_type="organization.created",
         title="Organization created",
         description=f"{clean_name} ({clean_domain}) was created.",
+        actor_label=actor_label,
     )
 
     try:
@@ -264,6 +273,8 @@ async def _organization_list_item(session: AsyncSession, org: Organization) -> d
         "is_provisioning": provisioning,
         "cluster_access": [{"slug": slug, "name": name} for slug, name in cluster_rows],
         "user_count": user_count,
+        "created_by": org.created_by,
+        "updated_by": org.updated_by,
         "created_at": org.created_at,
         "updated_at": org.updated_at,
     }
@@ -350,6 +361,8 @@ async def get_organization_overview(
             "status": org.status,
             "display_status": display_status,
             "is_provisioning": provisioning,
+            "created_by": org.created_by,
+            "updated_by": org.updated_by,
             "created_at": org.created_at,
             "updated_at": org.updated_at,
         },
@@ -388,6 +401,7 @@ async def update_organization(
     name: str | None = None,
     domain: str | None = None,
     status: str | None = None,
+    actor_label: str = DEFAULT_ADMIN_ACTOR,
 ) -> Organization:
     org = await get_organization_or_404(session, organization_id)
 
@@ -408,12 +422,15 @@ async def update_organization(
             raise OrganizationError("invalid status", code="validation_error")
         org.status = status
 
+    org.updated_by = actor_label
+
     await record_audit(
         session,
         organization_id,
         event_type="organization.updated",
         title="Organization profile updated",
         description=f"Profile for {org.name} was updated.",
+        actor_label=actor_label,
     )
 
     try:
@@ -429,15 +446,19 @@ async def update_organization(
 async def suspend_organization(
     session: AsyncSession,
     organization_id: uuid.UUID,
+    *,
+    actor_label: str = DEFAULT_ADMIN_ACTOR,
 ) -> Organization:
     org = await get_organization_or_404(session, organization_id)
     org.status = "suspended"
+    org.updated_by = actor_label
     await record_audit(
         session,
         organization_id,
         event_type="organization.suspended",
         title="Organization suspended",
         description=f"{org.name} was suspended by an administrator.",
+        actor_label=actor_label,
     )
     await session.commit()
     await session.refresh(org)
@@ -448,6 +469,8 @@ async def assign_cluster(
     session: AsyncSession,
     organization_id: uuid.UUID,
     cluster_id: uuid.UUID,
+    *,
+    actor_label: str = DEFAULT_ADMIN_ACTOR,
 ) -> None:
     await get_organization_or_404(session, organization_id)
     cluster = await session.get(WebDiscoveryCluster, cluster_id)
@@ -462,7 +485,11 @@ async def assign_cluster(
         return
 
     session.add(
-        OrganizationCluster(organization_id=organization_id, cluster_id=cluster_id)
+        OrganizationCluster(
+            organization_id=organization_id,
+            cluster_id=cluster_id,
+            assigned_by=actor_label,
+        )
     )
     await record_audit(
         session,
@@ -470,6 +497,7 @@ async def assign_cluster(
         event_type="access.cluster_assigned",
         title="Cluster access granted",
         description=f"Cluster {cluster.slug} was assigned to the organization.",
+        actor_label=actor_label,
     )
     await session.commit()
 
@@ -478,6 +506,8 @@ async def unassign_cluster(
     session: AsyncSession,
     organization_id: uuid.UUID,
     cluster_id: uuid.UUID,
+    *,
+    actor_label: str = DEFAULT_ADMIN_ACTOR,
 ) -> None:
     row = await session.get(
         OrganizationCluster,
@@ -492,6 +522,7 @@ async def unassign_cluster(
         event_type="access.cluster_removed",
         title="Cluster access removed",
         description="A cluster was removed from the organization scope.",
+        actor_label=actor_label,
     )
     await session.commit()
 
@@ -500,6 +531,8 @@ async def assign_company(
     session: AsyncSession,
     organization_id: uuid.UUID,
     company_id: uuid.UUID,
+    *,
+    actor_label: str = DEFAULT_ADMIN_ACTOR,
 ) -> None:
     await get_organization_or_404(session, organization_id)
     company = await session.get(Company, company_id)
@@ -520,7 +553,11 @@ async def assign_company(
         return
 
     session.add(
-        OrganizationCompany(organization_id=organization_id, company_id=company_id)
+        OrganizationCompany(
+            organization_id=organization_id,
+            company_id=company_id,
+            assigned_by=actor_label,
+        )
     )
     await record_audit(
         session,
@@ -529,6 +566,7 @@ async def assign_company(
         title="Company attached",
         description=f"Company {company.company_name} was attached to the organization.",
         metadata={"company_id": str(company_id)},
+        actor_label=actor_label,
     )
     try:
         await session.commit()
@@ -544,6 +582,8 @@ async def unassign_company(
     session: AsyncSession,
     organization_id: uuid.UUID,
     company_id: uuid.UUID,
+    *,
+    actor_label: str = DEFAULT_ADMIN_ACTOR,
 ) -> None:
     row = await session.get(
         OrganizationCompany,
@@ -558,6 +598,7 @@ async def unassign_company(
         event_type="access.company_removed",
         title="Company detached",
         description="A company was removed from the organization scope.",
+        actor_label=actor_label,
     )
     await session.commit()
 
@@ -570,6 +611,7 @@ async def create_invite(
     display_name: str,
     role: str = "staff",
     team: str | None = None,
+    actor_label: str = DEFAULT_ADMIN_ACTOR,
 ) -> tuple[OrganizationInvite, str]:
     await get_organization_or_404(session, organization_id)
 
@@ -621,6 +663,7 @@ async def create_invite(
         token_hash=token_hash,
         expires_at=now + timedelta(days=INVITE_TTL_DAYS),
         sent_at=now,
+        invited_by=actor_label,
     )
     session.add(invite)
     await record_audit(
@@ -630,6 +673,7 @@ async def create_invite(
         title="User invited",
         description=f"Invitation sent to {clean_email}.",
         metadata={"email": clean_email, "role": role},
+        actor_label=actor_label,
     )
     try:
         await session.commit()
@@ -645,6 +689,8 @@ async def resend_invite(
     session: AsyncSession,
     organization_id: uuid.UUID,
     invite_id: uuid.UUID,
+    *,
+    actor_label: str = DEFAULT_ADMIN_ACTOR,
 ) -> tuple[OrganizationInvite, str]:
     invite = await session.get(OrganizationInvite, invite_id)
     if invite is None or invite.organization_id != organization_id:
@@ -657,6 +703,7 @@ async def resend_invite(
     invite.token_hash = token_hash
     invite.expires_at = now + timedelta(days=INVITE_TTL_DAYS)
     invite.sent_at = now
+    invite.invited_by = actor_label
 
     await record_audit(
         session,
@@ -664,6 +711,7 @@ async def resend_invite(
         event_type="user.invite_resent",
         title="Invitation resent",
         description=f"Invitation resent to {invite.email}.",
+        actor_label=actor_label,
     )
     await session.commit()
     await session.refresh(invite)
@@ -697,6 +745,7 @@ async def accept_invite(session: AsyncSession, token: str) -> OrganizationMember
         team=invite.team,
         status="active",
         joined_at=now,
+        created_by=invite.invited_by,
     )
     invite.status = "accepted"
     invite.accepted_at = now
@@ -723,6 +772,8 @@ async def deactivate_member(
     session: AsyncSession,
     organization_id: uuid.UUID,
     member_id: uuid.UUID,
+    *,
+    actor_label: str = DEFAULT_ADMIN_ACTOR,
 ) -> OrganizationMember:
     member = await session.get(OrganizationMember, member_id)
     if member is None or member.organization_id != organization_id:
@@ -731,6 +782,8 @@ async def deactivate_member(
     now = _utcnow()
     member.status = "deactivated"
     member.deactivated_at = now
+    member.deactivated_by = actor_label
+    member.updated_by = actor_label
 
     await record_audit(
         session,
@@ -738,6 +791,7 @@ async def deactivate_member(
         event_type="user.deactivated",
         title="User deactivated",
         description=f"{member.email} was deactivated.",
+        actor_label=actor_label,
     )
     await session.commit()
     await session.refresh(member)
@@ -752,6 +806,7 @@ async def update_member(
     display_name: str | None = None,
     role: str | None = None,
     team: str | None = None,
+    actor_label: str = DEFAULT_ADMIN_ACTOR,
 ) -> OrganizationMember:
     member = await session.get(OrganizationMember, member_id)
     if member is None or member.organization_id != organization_id:
@@ -771,6 +826,8 @@ async def update_member(
     if team is not None:
         member.team = team.strip() or None
 
+    member.updated_by = actor_label
+
     await session.commit()
     await session.refresh(member)
     return member
@@ -779,6 +836,8 @@ async def update_member(
 async def rotate_integration_key(
     session: AsyncSession,
     organization_id: uuid.UUID,
+    *,
+    actor_label: str = DEFAULT_ADMIN_ACTOR,
 ) -> tuple[OrganizationApiKey, str]:
     await get_organization_or_404(session, organization_id)
     now = _utcnow()
@@ -795,12 +854,14 @@ async def rotate_integration_key(
     for key in active_keys:
         key.is_active = False
         key.revoked_at = now
+        key.revoked_by = actor_label
 
     full_key, key_prefix, key_hash = generate_integration_key()
     row = OrganizationApiKey(
         organization_id=organization_id,
         key_prefix=key_prefix,
         key_hash=key_hash,
+        created_by=actor_label,
     )
     session.add(row)
 
@@ -810,6 +871,7 @@ async def rotate_integration_key(
         event_type="integration_key.rotated",
         title="Integration key rotated",
         description="A new integration key was issued for this organization.",
+        actor_label=actor_label,
     )
     await session.commit()
     await session.refresh(row)
@@ -837,6 +899,8 @@ async def get_integration_key_metadata(
 async def update_security_config(
     session: AsyncSession,
     organization_id: uuid.UUID,
+    *,
+    actor_label: str = DEFAULT_ADMIN_ACTOR,
     **fields: Any,
 ) -> OrganizationAuthConfig:
     await get_organization_or_404(session, organization_id)
@@ -859,12 +923,15 @@ async def update_security_config(
         if key in allowed and value is not None:
             setattr(auth, key, value)
 
+    auth.updated_by = actor_label
+
     await record_audit(
         session,
         organization_id,
         event_type="security.policy_updated",
         title="Security policy updated",
         description="Organization security controls were updated.",
+        actor_label=actor_label,
     )
     await session.commit()
     await session.refresh(auth)
@@ -930,11 +997,11 @@ async def list_invites(
 async def list_assigned_clusters(
     session: AsyncSession,
     organization_id: uuid.UUID,
-) -> list[WebDiscoveryCluster]:
+) -> list[tuple[WebDiscoveryCluster, OrganizationCluster]]:
     await get_organization_or_404(session, organization_id)
     rows = (
         await session.execute(
-            select(WebDiscoveryCluster)
+            select(WebDiscoveryCluster, OrganizationCluster)
             .join(
                 OrganizationCluster,
                 OrganizationCluster.cluster_id == WebDiscoveryCluster.id,
@@ -942,18 +1009,18 @@ async def list_assigned_clusters(
             .where(OrganizationCluster.organization_id == organization_id)
             .order_by(WebDiscoveryCluster.name)
         )
-    ).scalars().all()
+    ).all()
     return list(rows)
 
 
 async def list_assigned_companies(
     session: AsyncSession,
     organization_id: uuid.UUID,
-) -> list[Company]:
+) -> list[tuple[Company, OrganizationCompany]]:
     await get_organization_or_404(session, organization_id)
     rows = (
         await session.execute(
-            select(Company)
+            select(Company, OrganizationCompany)
             .join(
                 OrganizationCompany,
                 OrganizationCompany.company_id == Company.id,
@@ -961,5 +1028,5 @@ async def list_assigned_companies(
             .where(OrganizationCompany.organization_id == organization_id)
             .order_by(Company.company_name)
         )
-    ).scalars().all()
+    ).all()
     return list(rows)

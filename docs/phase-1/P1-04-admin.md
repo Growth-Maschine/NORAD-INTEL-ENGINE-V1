@@ -81,6 +81,8 @@ Table: `organizations` · API: `/api/admin/organizations` · Auth: `X-Admin-Toke
 | domain | string(255) | Yes | Yes | Org list subtitle | Unique; normalized lowercase |
 | status | enum (`active`, `suspended`) | Yes | Yes | Status badge | Admin-controlled |
 | display_status | derived | — | Yes | List/detail badge | `provisioning` when in-flight runs in org scope |
+| created_by | string(255) | Yes | No | Internal | GM operator label · header `X-Actor-Label` or `admin` |
+| updated_by | string(255) | No | No | Internal | Last profile/status change |
 | created_at | timestamptz | Yes | No | Internal | |
 | updated_at | timestamptz | Yes | No | Internal | |
 
@@ -98,7 +100,10 @@ Table: `organization_members` · Created after invite accept or direct accept fl
 | team | string(120) | No | Yes | Team filter | e.g. `Revenue` |
 | status | enum (`active`, `deactivated`) | Yes | Yes | Status badge | |
 | joined_at | timestamptz | Yes | Yes | Joined date column | |
+| created_by | string(255) | Yes | No | Internal | Copied from `invite.invited_by` on accept |
+| updated_by | string(255) | No | No | Internal | Last profile edit |
 | deactivated_at | timestamptz | No | No | Internal | Set on deactivate |
+| deactivated_by | string(255) | No | No | Internal | GM operator on deactivate |
 
 ### 2.3 Organization invite
 
@@ -113,6 +118,7 @@ Table: `organization_invites`
 | role | enum (`staff`, `manager`) | Yes | Yes | — | |
 | team | string(120) | No | Yes | — | |
 | status | enum (`pending`, `accepted`, `expired`, `cancelled`) | Yes | Yes | Overview card | |
+| invited_by | string(255) | Yes | No | Internal | GM operator who sent/resent invite |
 | token_hash | string(64) | Yes | No | Internal | SHA-256; plaintext once on create/resend |
 | expires_at | timestamptz | Yes | No | Internal | Default 7 days |
 | sent_at | timestamptz | No | No | Internal | |
@@ -130,6 +136,8 @@ Table: `organization_api_keys`
 | key_prefix | string(24) | Yes | No | Key metadata | Display only — e.g. `norad_org_…` |
 | key_hash | string(64) | Yes | No | Internal | SHA-256 of full key |
 | is_active | boolean | Yes | No | Internal | One active per org |
+| created_by | string(255) | Yes | No | Internal | Issuer on create/rotate |
+| revoked_by | string(255) | No | No | Internal | Set when rotated |
 | expires_at | timestamptz | No | No | Future UI | Schema only |
 | last_used_at | timestamptz | No | No | Internal | |
 | revoked_at | timestamptz | No | No | Internal | Set on rotate |
@@ -148,6 +156,7 @@ Table: `organization_auth_config` · 1:1 with org · **schema-first** (SSO wirin
 | ip_allowlist | JSON array[string] | Yes | No | Security tab | |
 | sso_provider | string(64) | No | No | Authentication (future) | |
 | sso_config | JSON object | Yes | No | Internal | |
+| updated_by | string(255) | No | No | Internal | Last security policy edit |
 
 ### 2.6 Organization access (join tables)
 
@@ -158,6 +167,7 @@ Table: `organization_auth_config` · 1:1 with org · **schema-first** (SSO wirin
 | organization_id | UUID | Yes | PK part 1 |
 | cluster_id | UUID | Yes | PK part 2 · FK CASCADE both sides |
 | assigned_at | timestamptz | Yes | |
+| assigned_by | string(255) | Yes | GM operator who granted access |
 
 **`organization_companies`** — org ↔ `companies` (**`UNIQUE(company_id)`** — one company, one org)
 
@@ -166,6 +176,7 @@ Table: `organization_auth_config` · 1:1 with org · **schema-first** (SSO wirin
 | organization_id | UUID | Yes | PK part 1 |
 | company_id | UUID | Yes | PK part 2 · exclusive globally |
 | assigned_at | timestamptz | Yes | |
+| assigned_by | string(255) | Yes | GM operator who attached company |
 
 ### 2.7 Organization audit event
 
@@ -506,7 +517,7 @@ One row per **must-have profile parameter** per card (44 rows per `CompanyCardV1
 
 **Completeness % formula:** `round((verified + uncertain × 0.5) / 44 × 100)` — stored on `cards.profile_completeness_pct`.
 
-**Backfill:** `scripts/backfill_card_profile_parameters.py` for cards created before migration `0010`.
+**Backfill:** `apps/api/scripts/backfill_card_profile_parameters.py` for cards created before migration `0010`.
 
 ---
 

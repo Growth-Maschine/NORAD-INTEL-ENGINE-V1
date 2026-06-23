@@ -30,6 +30,7 @@ class OrganizationInvite(Base, UUIDPrimaryKey, TimestampsMixin):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    invited_by: Mapped[str] = mapped_column(String(255), nullable=False, default="admin")
 
     __table_args__ = (
         CheckConstraint(
@@ -51,6 +52,10 @@ class OrganizationInvite(Base, UUIDPrimaryKey, TimestampsMixin):
         CheckConstraint(
             "char_length(token_hash) = 64",
             name="ck_organization_invites_token_hash_len",
+        ),
+        CheckConstraint(
+            "char_length(invited_by) > 0",
+            name="ck_organization_invites_invited_by_nonempty",
         ),
         Index("ix_organization_invites_org_status", "organization_id", "status"),
     )

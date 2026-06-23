@@ -10,6 +10,17 @@ from fastapi import Header, HTTPException, status
 
 from app.core.config import get_settings
 
+DEFAULT_ADMIN_ACTOR = "admin"
+
+
+def get_admin_actor(
+    x_actor_label: str | None = Header(default=None, alias="X-Actor-Label"),
+) -> str:
+    """GM operator label for created_by / actor attribution (email or name)."""
+    if x_actor_label and x_actor_label.strip():
+        return x_actor_label.strip()[:255]
+    return DEFAULT_ADMIN_ACTOR
+
 
 def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
     settings = get_settings()

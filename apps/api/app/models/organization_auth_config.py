@@ -28,6 +28,7 @@ class OrganizationAuthConfig(Base):
     ip_allowlist: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     sso_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
     sso_config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

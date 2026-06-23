@@ -23,13 +23,15 @@ dist/
 .vscode/
 .cursor/
 
+# ── Local workspace (Cursor / one-offs — never commit) ─────────────────────
+.local/
+
 # ── Replit-specific (don't ship to GitHub) ─────────────────────────────────
 .replit
 replit.nix
 replit.md
 .config/
 .upm/
-.local/
 .agents/
 attached_assets/
 screenshots/
@@ -54,14 +56,10 @@ docs/reports/*.json
 docs/reports/*.docx
 docs/architecture/*.eraser
 docs/architecture/NORAD_STAKEHOLDER_DIAGRAMS.md
-scripts/build_unit_cost_report_docx.py
-scripts/build_infrastructure_report_docx.py
-# GCP ops — local config only (copy from config.env.example)
-scripts/gcp-migration/config.env
-scripts/gcp-migration/connection.env
-scripts/gcp-migration/*.dump
-scripts/gcp-migration/cloud-sql-proxy
-scripts/dev_port.py
-scripts/export_companies_full_json.py
+# GCP ops — local secrets/artifacts only (copy from config.env.example)
+ops/gcp-migration/config.env
+ops/gcp-migration/connection.env
+ops/gcp-migration/*.dump
+ops/gcp-migration/cloud-sql-proxy
 /PLAN.md
 /JOURNAL.md

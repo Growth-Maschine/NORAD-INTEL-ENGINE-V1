@@ -6,7 +6,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.admin_auth import require_admin
+from app.core.admin_auth import get_admin_actor, require_admin
 from app.core.db import get_session
 from app.schemas.organizations import (
     AcceptInviteIn,
@@ -82,7 +82,10 @@ def _member_out(row) -> MemberOut:
         team=row.team,
         status=row.status,
         joined_at=row.joined_at,
+        created_by=row.created_by,
+        updated_by=row.updated_by,
         deactivated_at=row.deactivated_at,
+        deactivated_by=row.deactivated_by,
     )
 
 
@@ -94,6 +97,7 @@ def _invite_out(row) -> InviteOut:
         role=row.role,
         team=row.team,
         status=row.status,
+        invited_by=row.invited_by,
         expires_at=row.expires_at,
         sent_at=row.sent_at,
         accepted_at=row.accepted_at,
@@ -128,6 +132,7 @@ async def list_orgs(
 async def create_org(
     body: OrganizationCreateIn,
     _: None = Depends(require_admin),
+    actor: str = Depends(get_admin_actor),
     session: AsyncSession = Depends(get_session),
 ) -> OrganizationCreateOut:
     try:
@@ -136,6 +141,7 @@ async def create_org(
             name=body.name,
             domain=body.domain,
             status=body.status,
+            actor_label=actor,
         )
     except OrganizationError as exc:
         raise _org_error(exc) from exc
@@ -151,6 +157,8 @@ async def create_org(
             is_provisioning=overview["organization"]["is_provisioning"],
             cluster_access=[],
             user_count=0,
+            created_by=overview["organization"]["created_by"],
+            updated_by=overview["organization"]["updated_by"],
             created_at=overview["organization"]["created_at"],
             updated_at=overview["organization"]["updated_at"],
         ),
@@ -176,6 +184,7 @@ async def patch_org(
     organization_id: uuid.UUID,
     body: OrganizationUpdateIn,
     _: None = Depends(require_admin),
+    actor: str = Depends(get_admin_actor),
     session: AsyncSession = Depends(get_session),
 ) -> OrganizationOverviewOut:
     try:
@@ -185,6 +194,7 @@ async def patch_org(
             name=body.name,
             domain=body.domain,
             status=body.status,
+            actor_label=actor,
         )
         data = await get_organization_overview(session, organization_id)
     except OrganizationError as exc:
@@ -196,10 +206,11 @@ async def patch_org(
 async def suspend_org(
     organization_id: uuid.UUID,
     _: None = Depends(require_admin),
+    actor: str = Depends(get_admin_actor),
     session: AsyncSession = Depends(get_session),
 ) -> OkResponse:
     try:
-        await suspend_organization(session, organization_id)
+        await suspend_organization(session, organization_id, actor_label=actor)
     except OrganizationError as exc:
         raise _org_error(exc) from exc
     return OkResponse()
@@ -209,6 +220,7 @@ async def suspend_org(
 async def sync_org(
     organization_id: uuid.UUID,
     _: None = Depends(require_admin),
+    actor: str = Depends(get_admin_actor),
     session: AsyncSession = Depends(get_session),
 ) -> OkResponse:
     """Stub sync — records audit event until IdP connectors ship."""
@@ -220,6 +232,7 @@ async def sync_org(
             event_type="organization.sync",
             title="Policy sync completed",
             description="Identity and role mappings were synchronized across configured providers.",
+            actor_label=actor,
         )
         await session.commit()
     except OrganizationError as exc:
@@ -238,8 +251,14 @@ async def list_org_clusters(
     except OrganizationError as exc:
         raise _org_error(exc) from exc
     return [
-        ClusterAssignmentOut(id=r.id, name=r.name, slug=r.slug, assigned_at=None)
-        for r in rows
+        ClusterAssignmentOut(
+            id=cluster.id,
+            name=cluster.name,
+            slug=cluster.slug,
+            assigned_at=assignment.assigned_at,
+            assigned_by=assignment.assigned_by,
+        )
+        for cluster, assignment in rows
     ]
 
 
@@ -248,10 +267,11 @@ async def add_org_cluster(
     organization_id: uuid.UUID,
     body: AssignClusterIn,
     _: None = Depends(require_admin),
+    actor: str = Depends(get_admin_actor),
     session: AsyncSession = Depends(get_session),
 ) -> OkResponse:
     try:
-        await assign_cluster(session, organization_id, body.cluster_id)
+        await assign_cluster(session, organization_id, body.cluster_id, actor_label=actor)
     except OrganizationError as exc:
         raise _org_error(exc) from exc
     return OkResponse()
@@ -262,10 +282,11 @@ async def remove_org_cluster(
     organization_id: uuid.UUID,
     cluster_id: uuid.UUID,
     _: None = Depends(require_admin),
+    actor: str = Depends(get_admin_actor),
     session: AsyncSession = Depends(get_session),
 ) -> OkResponse:
     try:
-        await unassign_cluster(session, organization_id, cluster_id)
+        await unassign_cluster(session, organization_id, cluster_id, actor_label=actor)
     except OrganizationError as exc:
         raise _org_error(exc) from exc
     return OkResponse()
@@ -283,12 +304,13 @@ async def list_org_companies(
         raise _org_error(exc) from exc
     return [
         CompanyAssignmentOut(
-            id=r.id,
-            company_name=r.company_name,
-            domain=r.domain,
-            assigned_at=None,
+            id=company.id,
+            company_name=company.company_name,
+            domain=company.domain,
+            assigned_at=assignment.assigned_at,
+            assigned_by=assignment.assigned_by,
         )
-        for r in rows
+        for company, assignment in rows
     ]
 
 
@@ -297,10 +319,11 @@ async def add_org_company(
     organization_id: uuid.UUID,
     body: AssignCompanyIn,
     _: None = Depends(require_admin),
+    actor: str = Depends(get_admin_actor),
     session: AsyncSession = Depends(get_session),
 ) -> OkResponse:
     try:
-        await assign_company(session, organization_id, body.company_id)
+        await assign_company(session, organization_id, body.company_id, actor_label=actor)
     except OrganizationError as exc:
         raise _org_error(exc) from exc
     return OkResponse()
@@ -311,10 +334,11 @@ async def remove_org_company(
     organization_id: uuid.UUID,
     company_id: uuid.UUID,
     _: None = Depends(require_admin),
+    actor: str = Depends(get_admin_actor),
     session: AsyncSession = Depends(get_session),
 ) -> OkResponse:
     try:
-        await unassign_company(session, organization_id, company_id)
+        await unassign_company(session, organization_id, company_id, actor_label=actor)
     except OrganizationError as exc:
         raise _org_error(exc) from exc
     return OkResponse()
@@ -361,6 +385,7 @@ async def invite_org_user(
     organization_id: uuid.UUID,
     body: InviteCreateIn,
     _: None = Depends(require_admin),
+    actor: str = Depends(get_admin_actor),
     session: AsyncSession = Depends(get_session),
 ) -> InviteCreateOut:
     try:
@@ -371,6 +396,7 @@ async def invite_org_user(
             display_name=body.display_name,
             role=body.role,
             team=body.team,
+            actor_label=actor,
         )
     except OrganizationError as exc:
         raise _org_error(exc) from exc
@@ -382,10 +408,13 @@ async def resend_org_invite(
     organization_id: uuid.UUID,
     invite_id: uuid.UUID,
     _: None = Depends(require_admin),
+    actor: str = Depends(get_admin_actor),
     session: AsyncSession = Depends(get_session),
 ) -> InviteResendOut:
     try:
-        invite, token = await resend_invite(session, organization_id, invite_id)
+        invite, token = await resend_invite(
+            session, organization_id, invite_id, actor_label=actor
+        )
     except OrganizationError as exc:
         raise _org_error(exc) from exc
     return InviteResendOut(invite=_invite_out(invite), accept_token=token)
@@ -397,6 +426,7 @@ async def patch_org_user(
     member_id: uuid.UUID,
     body: MemberUpdateIn,
     _: None = Depends(require_admin),
+    actor: str = Depends(get_admin_actor),
     session: AsyncSession = Depends(get_session),
 ) -> MemberOut:
     try:
@@ -407,6 +437,7 @@ async def patch_org_user(
             display_name=body.display_name,
             role=body.role,
             team=body.team,
+            actor_label=actor,
         )
     except OrganizationError as exc:
         raise _org_error(exc) from exc
@@ -418,10 +449,13 @@ async def deactivate_org_user(
     organization_id: uuid.UUID,
     member_id: uuid.UUID,
     _: None = Depends(require_admin),
+    actor: str = Depends(get_admin_actor),
     session: AsyncSession = Depends(get_session),
 ) -> MemberOut:
     try:
-        member = await deactivate_member(session, organization_id, member_id)
+        member = await deactivate_member(
+            session, organization_id, member_id, actor_label=actor
+        )
     except OrganizationError as exc:
         raise _org_error(exc) from exc
     return _member_out(member)
@@ -443,6 +477,7 @@ async def get_org_integration_key(
         id=row.id,
         key_prefix=row.key_prefix,
         is_active=row.is_active,
+        created_by=row.created_by,
         expires_at=row.expires_at,
         last_used_at=row.last_used_at,
         created_at=row.created_at,
@@ -453,10 +488,13 @@ async def get_org_integration_key(
 async def rotate_org_integration_key(
     organization_id: uuid.UUID,
     _: None = Depends(require_admin),
+    actor: str = Depends(get_admin_actor),
     session: AsyncSession = Depends(get_session),
 ) -> IntegrationKeyRotateOut:
     try:
-        row, plaintext = await rotate_integration_key(session, organization_id)
+        row, plaintext = await rotate_integration_key(
+            session, organization_id, actor_label=actor
+        )
     except OrganizationError as exc:
         raise _org_error(exc) from exc
     return IntegrationKeyRotateOut(
@@ -464,6 +502,7 @@ async def rotate_org_integration_key(
             id=row.id,
             key_prefix=row.key_prefix,
             is_active=row.is_active,
+            created_by=row.created_by,
             expires_at=row.expires_at,
             last_used_at=row.last_used_at,
             created_at=row.created_at,
@@ -490,12 +529,14 @@ async def patch_org_security(
     organization_id: uuid.UUID,
     body: SecurityConfigIn,
     _: None = Depends(require_admin),
+    actor: str = Depends(get_admin_actor),
     session: AsyncSession = Depends(get_session),
 ) -> SecurityConfigOut:
     try:
         auth = await update_security_config(
             session,
             organization_id,
+            actor_label=actor,
             mfa_enforced=body.mfa_enforced,
             sso_only=body.sso_only,
             ip_allowlist_enabled=body.ip_allowlist_enabled,

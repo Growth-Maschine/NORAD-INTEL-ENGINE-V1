@@ -33,6 +33,8 @@ class OrganizationApiKey(Base, UUIDPrimaryKey):
         default=_utcnow,
     )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False, default="admin")
+    revoked_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -42,6 +44,10 @@ class OrganizationApiKey(Base, UUIDPrimaryKey):
         CheckConstraint(
             "char_length(key_hash) = 64",
             name="ck_organization_api_keys_hash_nonempty",
+        ),
+        CheckConstraint(
+            "char_length(created_by) > 0",
+            name="ck_organization_api_keys_created_by_nonempty",
         ),
         Index(
             "ix_organization_api_keys_org_active",

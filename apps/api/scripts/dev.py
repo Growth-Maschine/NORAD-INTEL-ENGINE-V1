@@ -7,9 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-# apps/api/scripts/dev.py → repo root
-REPO_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(REPO_ROOT / "scripts"))
+SCRIPTS_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPTS_DIR))
 
 from dev_port import find_free_port  # noqa: E402
 

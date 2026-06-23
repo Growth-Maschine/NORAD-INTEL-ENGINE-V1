@@ -21,6 +21,8 @@ class Organization(Base, UUIDPrimaryKey, TimestampsMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     domain: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", index=True)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False, default="admin")
+    updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     __table_args__ = (
         CheckConstraint("char_length(name) > 0", name="ck_organizations_name_nonempty"),
@@ -28,5 +30,9 @@ class Organization(Base, UUIDPrimaryKey, TimestampsMixin):
         CheckConstraint(
             "status IN ('active', 'suspended')",
             name="ck_organizations_status_enum",
+        ),
+        CheckConstraint(
+            "char_length(created_by) > 0",
+            name="ck_organizations_created_by_nonempty",
         ),
     )

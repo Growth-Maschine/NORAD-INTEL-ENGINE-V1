@@ -11,7 +11,7 @@ load_config() {
     # shellcheck disable=SC1091
     source "$SCRIPT_DIR/config.env"
   fi
-  : "${GCP_PROJECT:?Set GCP_PROJECT in scripts/gcp-migration/config.env}"
+  : "${GCP_PROJECT:?Set GCP_PROJECT in ops/gcp-migration/config.env}"
   : "${GCP_REGION:=europe-west2}"
   : "${SQL_INSTANCE:=norad-pg-prod}"
   : "${SQL_DATABASE:=norad}"

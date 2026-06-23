@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,4 +31,12 @@ class OrganizationCluster(Base):
         nullable=False,
         server_default=func.now(),
         default=_utcnow,
+    )
+    assigned_by: Mapped[str] = mapped_column(String(255), nullable=False, default="admin")
+
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(assigned_by) > 0",
+            name="ck_organization_clusters_assigned_by_nonempty",
+        ),
     )

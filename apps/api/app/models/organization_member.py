@@ -34,6 +34,9 @@ class OrganizationMember(Base, UUIDPrimaryKey, TimestampsMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False, default="admin")
+    updated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    deactivated_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("organization_id", "email", name="uq_organization_members_org_email"),
@@ -52,6 +55,10 @@ class OrganizationMember(Base, UUIDPrimaryKey, TimestampsMixin):
         CheckConstraint(
             "status IN ('active', 'deactivated')",
             name="ck_organization_members_status_enum",
+        ),
+        CheckConstraint(
+            "char_length(created_by) > 0",
+            name="ck_organization_members_created_by_nonempty",
         ),
         Index("ix_organization_members_org_status", "organization_id", "status"),
     )

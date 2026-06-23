@@ -8,6 +8,7 @@ Brand intelligence and BD deal-sourcing engine. Built by Growth Maschine.
 norad/
 ├── apps/
 │   ├── api/             FastAPI backend (Python 3.11, port 8000)
+│   │   └── scripts/     Dev launcher + DB maintenance scripts
 │   └── web/             React + Vite + TypeScript + Tailwind (port 5000)
 ├── docs/
 │   ├── strategy/        Blueprint, plan, stack, cost research
@@ -15,7 +16,8 @@ norad/
 │   ├── phase-1/         Product specs and test plans
 │   ├── research/        Research-query templates (Parallel + Exa)
 │   └── reports/         Client-deliverable .docx + .xlsx reports
-└── scripts/             One-off generators + GCP migration helpers
+├── ops/                 GCP / deploy helpers (not runtime code)
+└── .local/              Gitignored — Cursor one-offs, local exports
 ```
 
 ## Running locally

@@ -6,7 +6,7 @@ apps/web/
 
 # Docs / repo meta
 docs/
-scripts/
+ops/
 README.md
 DEPLOYMENT.md
 
