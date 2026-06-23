@@ -4,8 +4,8 @@
 |-------|-------|
 | **Document ref** | P1-02-User |
 | **Title** | Core Product Objects — Analyst perspective |
-| **Version** | 2.1 |
-| **Last updated** | 2026-06-16 |
+| **Version** | 2.2 |
+| **Last updated** | 2026-06-22 |
 | **Audience** | Stakeholders, product, analysts |
 | **Controlling doc** | [P1-00 Overview](./phase-1-overview.md) |
 | **Paired doc** | [P1-02-Admin](./P1-02-admin.md) — same persisted rows, operator labels |
@@ -75,13 +75,13 @@ NORAD is **one application**. There is no separate analyst-only frontend. Operat
 
 | # | Object | One-line meaning |
 |---|--------|------------------|
-| 3.1 | Organization | Tenant that owns all data (deferred) |
-| 3.2 | User | Person using NORAD (deferred auth) |
-| 3.3 | Article | One deduplicated web story with Sonnet enrich |
-| 3.4 | Web Discovery result card | One URL hit as shown on the results page |
-| 3.5 | Company | A business entity NORAD has researched or can research |
-| 3.6 | Company Profile | Deep-research output for one company (one card version) |
-| 3.7 | Deep research action | Analyst choice to run full company profiling |
+| 3.1 | Organization | Customer tenant (e.g. BAT) | `organizations` |
+| 3.2 | Organization member | Analyst user under that org | `organization_members` |
+| 3.3 | Article | One deduplicated web story with Sonnet enrich | `articles` |
+| 3.4 | Web Discovery result card | One URL hit as shown on the results page | run-scoped + hydration |
+| 3.5 | Company | A business entity NORAD has researched or can research | `companies` |
+| 3.6 | Company Profile | Deep-research output for one company (one card version) | `cards` |
+| 3.7 | Deep research action | Analyst choice to run full company profiling | `POST /api/research/runs` |
 
 ---
 
@@ -91,19 +91,21 @@ NORAD is **one application**. There is no separate analyst-only frontend. Operat
 
 | | |
 |--|--|
-| **What** | The customer account (e.g. BAT) that owns clusters, articles, and companies |
-| **Why** | Multi-tenant isolation when the product scales |
-| **Example** | “BAT Intelligence” — all clusters and companies under one tenant |
-| **Where in UI** | Not exposed in MVP |
+| **What** | The customer account (e.g. BAT) that scopes which clusters and companies analysts can see |
+| **Why** | Multi-tenant isolation — analyst app authenticates with org integration key + user session (future) |
+| **Example** | “Acme Inc.” — GM admin assigns clusters and companies on the **Access** tab |
+| **Where in UI** | Not in `apps/web` — managed in **GM Admin Console**; analyst app reads scoped data (future) |
 
-### 4.2 User
+### 4.2 Organization member (analyst user)
 
 | | |
 |--|--|
-| **What** | A person using NORAD to read intelligence and trigger research |
-| **Why** | Future attribution and permissions |
-| **Example** | Analyst reads Web Discovery results and clicks **Deep research** on a company |
-| **Where in UI** | All routes — no login gate in current build |
+| **What** | A person invited under an organization to use the analyst frontend |
+| **Why** | Per-customer user roster — roles `staff` \| `manager` (same permissions for now) |
+| **Example** | Analyst accepts invite → reads Web Discovery results and company profiles for their org's scope |
+| **Where in UI** | Invited/managed in GM Admin Console → org **Users** tab; logs in via **future analyst app** (not `apps/web`) |
+
+**Not the same as** GM operator (internal staff) or legacy `apps/web` console user.
 
 ---
 

@@ -4,8 +4,8 @@
 |-------|-------|
 | **Document ref** | P1-05-Admin |
 | **Title** | UI Screen Mapping — Admin Console |
-| **Version** | 2.1 |
-| **Last updated** | 2026-06-16 |
+| **Version** | 2.2 |
+| **Last updated** | 2026-06-22 |
 | **Controlling doc** | [P1-00 Overview](./phase-1-overview.md) |
 | **Audience** | Internal developers, operators |
 | **Linear** | [GRO-270](https://linear.app/growthmaschine/issue/GRO-270/50-map-existing-ui-screens-to-product-data-objects) · Parent [GRO-265](https://linear.app/growthmaschine/issue/GRO-265) |
@@ -18,7 +18,14 @@
 
 ## 1. Introduction
 
-Maps every **operator screen** in the single NORAD app to product objects and actions. Workflow narrative: [P1-01-Admin](./P1-01-admin.md). Field spec: [P1-04](./P1-04-admin.md) Part I.
+Maps **operator screens** to product objects and actions. Two surfaces:
+
+| Surface | Repo | Scope |
+|---------|------|--------|
+| **Legacy operator console** | `apps/web` | Web Discovery, Companies, Settings — §2–§3 below |
+| **GM Admin Console** | Separate frontend (not in this repo) | Organizations, users, access — §4 below |
+
+Workflow narrative: [P1-01-Admin](./P1-01-admin.md). Field spec: [P1-04](./P1-04-admin.md) Part I.
 
 ---
 
@@ -36,6 +43,20 @@ Maps every **operator screen** in the single NORAD app to product objects and ac
 | 8 | Companies list | `/companies` | §3.3 |
 | 9 | Company detail | `/companies/:id` | §3.4–3.5 |
 | 10 | Settings | `/settings` | §7 |
+
+### 2.1 GM Admin Console (separate frontend — API built, UI not wired)
+
+| # | Screen | Route | Backend |
+| --- | -------- | ------- | --------- |
+| 11 | Organizations list | `/dashboard/organizations` | `GET /api/admin/organizations` |
+| 12 | Create organization | modal on list | `POST /api/admin/organizations` |
+| 13 | Organization detail — Overview | `/dashboard/organizations/:id` | `GET .../overview` |
+| 14 | Organization detail — Users | tab | `GET/POST .../users`, `POST .../invites/{id}/resend` |
+| 15 | Organization detail — Access | tab | `GET/POST/DELETE .../clusters`, `.../companies` |
+| 16 | Organization detail — Security | tab | `GET/PATCH .../security` |
+| 17 | Organization detail — Activity | tab | `GET .../activity` |
+
+Auth: `X-Admin-Token`. Full API map: [ORG_USER_SETUP.md](../api/ORG_USER_SETUP.md).
 
 ---
 
@@ -256,7 +277,36 @@ Shared with analyst journey — same `companies` + `cards` tables on `/companies
 
 ---
 
-## 6. Navigation map
+## 4. GM Admin Console — screen → objects → actions
+
+Separate frontend. API reference: [ORG_USER_SETUP.md](../api/ORG_USER_SETUP.md).
+
+### 4.1 Organizations list
+
+**Objects:** Organization
+
+| Control | Action | API |
+|---------|--------|-----|
+| Page load | List orgs | `GET /api/admin/organizations` |
+| Search / status filter | Filter list | query params |
+| + Create Organization | Open modal | `POST /api/admin/organizations` |
+| Row click | → org detail | — |
+
+### 4.2 Organization detail (tabs)
+
+**Objects:** Organization, Organization member, Integration key, Cluster (assignment), Company (assignment)
+
+| Tab | Controls | API |
+|-----|----------|-----|
+| Overview | Summary cards, Sync, Suspend, Rotate keys | `GET .../overview`, `POST .../suspend`, `POST .../sync`, `POST .../integration-key/rotate` |
+| Users | List, filters, + Add user, row actions | `GET .../users`, `POST .../users`, `PATCH .../users/{id}`, `POST .../deactivate` |
+| Access | Assign/remove clusters and companies | `GET/POST/DELETE .../clusters`, `.../companies` |
+| Security | Policy toggles | `GET/PATCH .../security` |
+| Activity | Audit trail | `GET .../activity` |
+
+---
+
+## 5. Legacy console navigation map
 
 ```mermaid
 flowchart TB
@@ -283,11 +333,12 @@ flowchart TB
 
 ---
 
-## 7. Completion checklist
+## 6. Completion checklist
 
 | Item |
 |------|
-| Every admin screen listed |
+| Every legacy admin screen listed (§2–§3) |
+| GM Admin Console screens listed (§2.1, §4) |
 | Objects per screen |
 | Actions with backend where known |
 | Cross-ref P1-01-Admin |

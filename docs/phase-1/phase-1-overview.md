@@ -4,8 +4,8 @@
 |-------|-------|
 | **Document ref** | P1-00 |
 | **Title** | Phase 1 Overview — controlling specification |
-| **Version** | 1.2 |
-| **Last updated** | 2026-06-16 |
+| **Version** | 1.3 |
+| **Last updated** | 2026-06-22 |
 | **Status** | Active — source of truth for what is **built today** |
 
 ---
@@ -28,7 +28,14 @@ Older Phase 1 drafts described a **Today page**, TrendHunter categories, analyst
 4. Trigger **Deep research** on a mentioned company to produce a **Company Card** (`CompanyCardV1`).
 5. Monitor research on the **Companies** page and tune engines in **Settings**.
 
-There is **one web app** (`apps/web`) and **one API** (`apps/api`). There is no separate analyst-only frontend in this repo.
+There is **one API** (`apps/api`) and **two operator-facing web clients**:
+
+| Client | Role | Status |
+|--------|------|--------|
+| `apps/web` | Legacy operator console — Web Discovery, Companies, Settings | Built in this repo |
+| **GM Admin Console** (separate frontend) | Organization / user / access management | UI built — **not wired** to API yet |
+
+There is **no analyst-only frontend** in this repo yet. Analyst users are modeled under organizations (`organization_members`) for a future analyst app.
 
 ---
 
@@ -48,6 +55,9 @@ There is **one web app** (`apps/web`) and **one API** (`apps/api`). There is no 
 | Discovered companies | `/companies` (Discovered tab) | `GET /api/research/discovered` |
 | Company profile | `/companies/:id` | `GET /api/research/companies/:id`, evidence API, **`GET .../profile-completeness`** |
 | Settings | `/settings` | `GET/PUT /api/settings/research`, `GET /health/db` |
+| **Organizations (GM admin)** | `/dashboard/organizations` (separate frontend) | `GET/POST /api/admin/organizations`, org detail tabs — see [ORG_USER_SETUP.md](../api/ORG_USER_SETUP.md) |
+
+**Organization admin API** (`/api/admin/organizations/*`) is **built** — migration `0012`, `X-Admin-Token` in prod. GM staff only. Analyst SSO and read-path tenant enforcement are **deferred**.
 
 **Pipelines (both run in the API process via `asyncio.create_task` — no separate worker):**
 
@@ -70,6 +80,14 @@ There is **one web app** (`apps/web`) and **one API** (`apps/api`). There is no 
 | `cards`, `sources` | Deep research output (linked via `companies.canonical_card_id`) |
 | `card_profile_parameters` | 44 must-have profile completeness rows per card — materialized at persist |
 | `app_kv` | Research engine settings (`research_config`) |
+| `organizations` | Customer tenant — name, domain, status |
+| `organization_members` | Analyst users under an org (`staff` \| `manager`) |
+| `organization_invites` | Pending invite before member row exists |
+| `organization_api_keys` | Per-org integration key for analyst frontend (hashed at rest) |
+| `organization_clusters` | M2M — which clusters an org can access |
+| `organization_companies` | M2M — which companies belong to an org (**exclusive**: one company → one org) |
+| `organization_auth_config` | SSO / MFA policy toggles (schema-first) |
+| `organization_audit_events` | Org-scoped audit trail (Activity tab) |
 
 **Database:** GCP Cloud SQL Postgres (`GCP_DATABASE_URL*`). Not Supabase.
 
@@ -94,7 +112,7 @@ There is **one web app** (`apps/web`) and **one API** (`apps/api`). There is no 
 | **`signals` table** | Dropped in `sql/0011_drop_signals.sql` — BD signals/scores not persisted |
 | **Fit scores / recommended actions in synthesis** | Stripped from Deep Research — future frontend owns BD layer |
 | **`GET /brands`** | Placeholder removed |
-| **Analyst-only app** | Single app serves operator workflows |
+| **Analyst-only app** | Single legacy app serves operator workflows; analyst app is separate (future) |
 
 ---
 
@@ -181,16 +199,16 @@ Documents are maintained in order. **P1-00 (this file) is authoritative for scop
 
 | Ref | File | Subject | Status |
 |-----|------|---------|--------|
-| **P1-00** | [phase-1-overview.md](./phase-1-overview.md) | Controlling overview | **v1.2 — this document** |
+| **P1-00** | [phase-1-overview.md](./phase-1-overview.md) | Controlling overview | **v1.3 — this document** |
 | P1-01-Admin | [P1-01-admin.md](./P1-01-admin.md) | Operator workflows | v3.1 — revised 2026-06-16 |
 | P1-01-User | [P1-01-user.md](./P1-01-user.md) | Analyst workflows (same app) | v2.1 — revised 2026-06-16 |
-| P1-02-Admin | [P1-02-admin.md](./P1-02-admin.md) | Operator product objects | v2.1 — revised 2026-06-16 |
-| P1-02-User | [P1-02-user.md](./P1-02-user.md) | Analyst product objects | v2.1 — revised 2026-06-16 |
-| P1-03 | [P1-03.md](./P1-03.md) | Object relationships | v2.1 — revised 2026-06-16 |
-| P1-04-Admin | [P1-04-admin.md](./P1-04-admin.md) | Required fields | v3.2 — migrations `0009`–`0011`; 11 live tables |
-| P1-05-Admin | [P1-05-admin.md](./P1-05-admin.md) | Operator UI mapping | v2.1 — revised 2026-06-16 |
+| P1-02-Admin | [P1-02-admin.md](./P1-02-admin.md) | Operator product objects | v2.2 — org tables added 2026-06-22 |
+| P1-02-User | [P1-02-user.md](./P1-02-user.md) | Analyst product objects | v2.2 — org model added 2026-06-22 |
+| P1-03 | [P1-03.md](./P1-03.md) | Object relationships | v2.2 — org scoping 2026-06-22 |
+| P1-04-Admin | [P1-04-admin.md](./P1-04-admin.md) | Required fields | v3.3 — migration `0012`; **19 live tables** |
+| P1-05-Admin | [P1-05-admin.md](./P1-05-admin.md) | Operator UI mapping | v2.2 — GM admin console screens 2026-06-22 |
 | P1-05-User | [P1-05-user.md](./P1-05-user.md) | Analyst UI mapping | v2.1 — revised 2026-06-16 |
-| P1-06 | [P1-06.md](./P1-06.md) | Backend actions | v2.1 — revised 2026-06-16 |
+| P1-06 | [P1-06.md](./P1-06.md) | Backend actions | v2.2 — org admin APIs 2026-06-22 |
 | — | [phase2test.md](./phase2test.md) | SQL acceptance tests | Legacy — includes Phase 2 tables (`article_signals`, watchlist) not in current repo; use with P1-04 §3.6 |
 
 **Revision order (agreed):** P1-00 → P1-01-Admin + P1-01-User (paired) → P1-02 → … → P1-06.
@@ -212,8 +230,10 @@ When verifying behaviour, use these files first:
 | Web Discovery HTTP | `apps/api/app/routers/web_discovery.py` |
 | Research orchestration | `apps/api/app/services/research.py` |
 | Research HTTP | `apps/api/app/routers/research.py` |
+| **Organization admin HTTP** | `apps/api/app/routers/admin_organizations.py` |
+| Organization service | `apps/api/app/services/organizations.py` |
 | ORM models | `apps/api/app/models/` |
-| DDL | `apps/api/sql/` (apply with `GCP_DATABASE_URL_POOL` via `psql` or SQLAlchemy/psycopg) |
+| DDL | `apps/api/sql/` (apply with `norad_migrate` via `psql` or psycopg — see [ORG_USER_SETUP.md](../api/ORG_USER_SETUP.md)) |
 | Legacy signals/scores reference | `docs/reference/legacy-signals-scores-suggestions.md` |
 | Pipeline field guide | `docs/backend-pipeline.md` |
 

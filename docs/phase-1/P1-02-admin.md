@@ -4,8 +4,8 @@
 |-------|-------|
 | **Document ref** | P1-02-Admin |
 | **Title** | Core Product Objects — Operator perspective |
-| **Version** | 2.1 |
-| **Last updated** | 2026-06-16 |
+| **Version** | 2.2 |
+| **Last updated** | 2026-06-22 |
 | **Audience** | Internal developers, operators |
 | **Controlling doc** | [P1-00 Overview](./phase-1-overview.md) |
 | **Paired doc** | [P1-02-User](./P1-02-user.md) — same objects, analyst reading labels |
@@ -18,7 +18,7 @@
 
 This document defines every main **thing** in NORAD Intel Engine (`apps/web` + `apps/api`) from the **operator** perspective — what it is, why it exists, and a realistic example.
 
-NORAD is **one application**. There is no separate admin console binary. This doc focuses on objects the operator configures, runs, and audits. The analyst-facing names for the same persisted rows are in [P1-02-User](./P1-02-user.md).
+NORAD has **two operator surfaces**: the legacy console in `apps/web` (Web Discovery, Companies, Settings) and a **separate GM Admin Console** (Organizations, Roles, Authentication) that will call `/api/admin/organizations/*`. This doc covers objects for both. Analyst-facing names for shared persisted rows are in [P1-02-User](./P1-02-user.md).
 
 **Per-object format:**
 
@@ -67,22 +67,25 @@ Relationships are answered in [P1-03](./P1-03.md).
 
 | # | Object | One-line meaning | Backend |
 | --- | -------- | ------------------ | --------- |
-| 3.1 | Organization | Tenant owning all data | — (deferred) |
-| 3.2 | User | Person operating the app | — (no auth table) |
-| 3.3 | Cluster | Themed Exa search group | `web_discovery_clusters` |
-| 3.4 | Query | One Exa search in a cluster | `web_discovery_queries` |
-| 3.5 | Run | One cluster/query execution | `runs` · `source_kind = web_discovery` |
-| 3.6 | Search Result | One Exa hit from a run (run-scoped view) | slice of `runs.engine_outputs` |
-| 3.7 | Article | Deduplicated ingested web story | `articles` |
-| 3.8 | Deep Research Run | One company profiling execution | `runs` · `source_kind = research` |
-| 3.9 | Company | Canonical company entity | `companies` |
-| 3.10 | Company Card | Versioned research profile blob | `cards` |
-| 3.10 | Profile Completeness Parameter | Materialized audit row on a card | `card_profile_parameters` |
-| 3.12 | Source | Citation backing card fields | `sources` |
-| 3.13 | Run Event | Pipeline stage log line | `run_events` |
-| 3.14 | Engine Call | One vendor API call audit row | `engine_calls` |
-| 3.15 | Research Config | Engine settings in `app_kv` | `app_kv` |
-| 3.16 | Deep research trigger | User action: result → research run | via `POST /api/research/runs` |
+| 3.1 | Organization | Customer tenant | `organizations` |
+| 3.2 | Organization member | Analyst user under an org | `organization_members` |
+| 3.3 | Organization invite | Pending analyst onboarding | `organization_invites` |
+| 3.4 | Integration key | Per-org credential for analyst app | `organization_api_keys` |
+| 3.5 | GM operator | Growth Maschine staff using admin APIs | `X-Admin-Token` — no user table yet |
+| 3.6 | Cluster | Themed Exa search group | `web_discovery_clusters` |
+| 3.7 | Query | One Exa search in a cluster | `web_discovery_queries` |
+| 3.8 | Run | One cluster/query execution | `runs` · `source_kind = web_discovery` |
+| 3.9 | Search Result | One Exa hit from a run (run-scoped view) | slice of `runs.engine_outputs` |
+| 3.10 | Article | Deduplicated ingested web story | `articles` |
+| 3.11 | Deep Research Run | One company profiling execution | `runs` · `source_kind = research` |
+| 3.12 | Company | Canonical company entity | `companies` |
+| 3.13 | Company Card | Versioned research profile blob | `cards` |
+| 3.14 | Profile Completeness Parameter | Materialized audit row on a card | `card_profile_parameters` |
+| 3.15 | Source | Citation backing card fields | `sources` |
+| 3.16 | Run Event | Pipeline stage log line | `run_events` |
+| 3.17 | Engine Call | One vendor API call audit row | `engine_calls` |
+| 3.18 | Research Config | Engine settings in `app_kv` | `app_kv` |
+| 3.19 | Deep research trigger | User action: result → research run | via `POST /api/research/runs` |
 
 ---
 
@@ -92,21 +95,57 @@ Relationships are answered in [P1-03](./P1-03.md).
 
 | | |
 |--|--|
-| **What** | Customer tenant owning clusters, runs, companies, and users |
-| **Why** | Data isolation for multi-customer deployment |
-| **Example** | BAT — all `web_discovery_clusters` and `companies` scoped to this org |
-| **Backend** | Single-tenant — no `organizations` table yet |
-| **Where in UI** | Not exposed |
+| **What** | Customer tenant — owns scoped cluster/company access and analyst users |
+| **Why** | Multi-customer isolation (e.g. BAT as one org) |
+| **Example** | Acme Inc. (`acme.inc`) — assigned `north-america-research` cluster + selected companies |
+| **Backend** | `organizations` + join tables `organization_clusters`, `organization_companies` |
+| **Where in UI** | GM Admin Console → `/dashboard/organizations` (separate frontend — not in `apps/web`) |
 
-### 4.2 User
+**Status values:** `active`, `suspended`. **Display status `provisioning`** is computed when discovery/research runs are in-flight for the org's scope.
+
+### 4.2 Organization member (analyst user)
 
 | | |
 |--|--|
-| **What** | Operator or analyst using the same app |
-| **Why** | Future audit trail and permissions |
+| **What** | Analyst person belonging to one organization |
+| **Why** | Future analyst app login + attribution |
+| **Example** | `rene.wells@acme.inc` — role `manager`, team `Revenue`, status `active` |
+| **Backend** | `organization_members` — roles `staff` \| `manager` (identical permissions for now) |
+| **Where in UI** | GM Admin Console → org detail → **Users** tab |
+
+Created via **invite flow** (`organization_invites` → `POST /api/invites/accept`). Email delivery deferred.
+
+### 4.3 Integration key
+
+| | |
+|--|--|
+| **What** | Per-org API credential for the analyst frontend to call NORAD |
+| **Why** | Machine auth scoped to tenant |
+| **Example** | Auto-generated on org create; rotated from org Overview → **Rotate integration keys** |
+| **Backend** | `organization_api_keys` — `key_hash` at rest; plaintext shown once on create/rotate |
+| **Where in UI** | GM Admin Console → org detail → Overview / Security actions |
+
+### 4.4 GM operator
+
+| | |
+|--|--|
+| **What** | Growth Maschine staff managing orgs, access, and invites |
+| **Why** | Internal control plane — not customer self-serve |
+| **Example** | Creates org, assigns clusters, invites analyst users |
+| **Backend** | `X-Admin-Token` on `/api/admin/organizations/*` when `DEBUG=false` |
+| **Where in UI** | GM Admin Console (all org routes) + legacy `apps/web` for pipelines |
+
+No `gm_users` table yet — shared admin token.
+
+### 4.5 Legacy console user (apps/web)
+
+| | |
+|--|--|
+| **What** | Person using the in-repo operator console for Web Discovery / Companies |
+| **Why** | Day-to-day pipeline operations |
 | **Example** | Operator triggers **Run All** on “Pouches” cluster |
-| **Backend** | No auth user table — admin gate disabled in API |
-| **Where in UI** | All routes |
+| **Backend** | No user table — open in dev; settings writes use admin token in prod |
+| **Where in UI** | `apps/web` — all legacy routes |
 
 ---
 
@@ -294,8 +333,10 @@ These are **choices** that spawn runs or update state. None are standalone table
 
 | Object | Meaning | Example |
 |--------|---------|---------|
-| Organization | Tenant | BAT |
-| User | App user | Console user |
+| Organization | Customer tenant | Acme Inc. |
+| Org member | Analyst under org | rene.wells@acme.inc |
+| Integration key | Analyst app credential | `norad_org_…` (prefix only in UI) |
+| GM operator | Internal admin | GM staff |
 | Cluster | Exa search theme | “Pouches” |
 | Query | One Exa search | “Pouch funding Canada” |
 | Run | One cluster/query execution | Run on June 5 |

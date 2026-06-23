@@ -4,8 +4,8 @@
 |-------|-------|
 | **Document ref** | P1-04 |
 | **Title** | Required Fields per Object |
-| **Version** | 3.2 |
-| **Last updated** | 2026-06-16 |
+| **Version** | 3.3 |
+| **Last updated** | 2026-06-22 |
 | **Audience** | Internal developers, operators |
 | **Controlling doc** | [P1-00 Overview](./phase-1-overview.md) |
 | **Linear** | [GRO-269](https://linear.app/growthmaschine/issue/GRO-269/40-define-required-fields-for-each-core-object) · Parent [GRO-265](https://linear.app/growthmaschine/issue/GRO-265) |
@@ -29,8 +29,8 @@ Single field-level spec for the NORAD data model. Companion to [P1-03](./P1-03.m
 
 | Rule | Decision |
 |------|----------|
-| `organization_id` | **Omitted** until multi-tenant ships |
-| Part I Notes | field notes vs models
+| `organization_id` on pipeline tables | **Deferred** — scoping uses `organization_clusters` / `organization_companies` join tables; `companies` and `web_discovery_clusters` rows stay global |
+| Part I Notes | field notes vs models |
 | Non-table objects | Views and actions — fields on parent tables |
 | AI Analysis | Not a table — fields on parent objects |
 
@@ -72,26 +72,121 @@ Object definitions: [P1-02-Admin](./P1-02-admin.md). Workflows: [P1-01-Admin](./
 
 ### 2.1 Organization
 
-No table in MVP. Documented for post-MVP schema design.
+Table: `organizations` · API: `/api/admin/organizations` · Auth: `X-Admin-Token` (prod)
 
 | Field | Type | Required | Searchable | UI | Notes |
 |-------|------|----------|------------|-----|-------|
-| id | UUID | Yes | No | Internal | Primary key ·|
-| name | string(255) | Yes | Yes | Internal | Tenant display name ·|
-| slug | string(120) | Yes | Yes | Internal | Unique tenant key ·|
-| created_at | timestamptz | Yes | No | Internal ||
-| updated_at | timestamptz | Yes | No | Internal ||
+| id | UUID | Yes | No | Internal | PK |
+| name | string(255) | Yes | Yes | Org list, detail header | |
+| domain | string(255) | Yes | Yes | Org list subtitle | Unique; normalized lowercase |
+| status | enum (`active`, `suspended`) | Yes | Yes | Status badge | Admin-controlled |
+| display_status | derived | — | Yes | List/detail badge | `provisioning` when in-flight runs in org scope |
+| created_at | timestamptz | Yes | No | Internal | |
+| updated_at | timestamptz | Yes | No | Internal | |
 
-### 2.2 User
+### 2.2 Organization member
+
+Table: `organization_members` · Created after invite accept or direct accept flow
 
 | Field | Type | Required | Searchable | UI | Notes |
 |-------|------|----------|------------|-----|-------|
-| id | UUID | Yes | No | Internal ||
-| email | string(255) | Yes | Yes | Settings profile ||
-| display_name | string(120) | No | Yes | Sidebar profile ||
-| role | enum (`operator`, `admin`) | Yes | No | Internal | Admin console access ·|
-| created_at | timestamptz | Yes | No | Internal ||
-| updated_at | timestamptz | Yes | No | Internal ||
+| id | UUID | Yes | No | Internal | PK |
+| organization_id | UUID | Yes | No | Internal | FK → `organizations.id` CASCADE |
+| email | string(320) | Yes | Yes | Users tab | Unique per org |
+| display_name | string(255) | Yes | Yes | Users tab | |
+| role | enum (`staff`, `manager`) | Yes | Yes | Role filter | Same permissions for now |
+| team | string(120) | No | Yes | Team filter | e.g. `Revenue` |
+| status | enum (`active`, `deactivated`) | Yes | Yes | Status badge | |
+| joined_at | timestamptz | Yes | Yes | Joined date column | |
+| deactivated_at | timestamptz | No | No | Internal | Set on deactivate |
+
+### 2.3 Organization invite
+
+Table: `organization_invites`
+
+| Field | Type | Required | Searchable | UI | Notes |
+|-------|------|----------|------------|-----|-------|
+| id | UUID | Yes | No | Internal | PK |
+| organization_id | UUID | Yes | No | Internal | FK CASCADE |
+| email | string(320) | Yes | Yes | Pending count | |
+| display_name | string(255) | Yes | No | Invite row | |
+| role | enum (`staff`, `manager`) | Yes | Yes | — | |
+| team | string(120) | No | Yes | — | |
+| status | enum (`pending`, `accepted`, `expired`, `cancelled`) | Yes | Yes | Overview card | |
+| token_hash | string(64) | Yes | No | Internal | SHA-256; plaintext once on create/resend |
+| expires_at | timestamptz | Yes | No | Internal | Default 7 days |
+| sent_at | timestamptz | No | No | Internal | |
+| accepted_at | timestamptz | No | No | Internal | |
+
+### 2.4 Integration key
+
+Table: `organization_api_keys`
+
+| Field | Type | Required | Searchable | UI | Notes |
+|-------|------|----------|------------|-----|-------|
+| id | UUID | Yes | No | Internal | PK |
+| organization_id | UUID | Yes | No | Internal | FK CASCADE |
+| name | string(120) | Yes | No | Internal | Default `default` |
+| key_prefix | string(24) | Yes | No | Key metadata | Display only — e.g. `norad_org_…` |
+| key_hash | string(64) | Yes | No | Internal | SHA-256 of full key |
+| is_active | boolean | Yes | No | Internal | One active per org |
+| expires_at | timestamptz | No | No | Future UI | Schema only |
+| last_used_at | timestamptz | No | No | Internal | |
+| revoked_at | timestamptz | No | No | Internal | Set on rotate |
+
+### 2.5 Organization auth config
+
+Table: `organization_auth_config` · 1:1 with org · **schema-first** (SSO wiring deferred)
+
+| Field | Type | Required | Searchable | UI | Notes |
+|-------|------|----------|------------|-----|-------|
+| organization_id | UUID | Yes | No | Internal | PK, FK → organizations |
+| mfa_enforced | boolean | Yes | No | Security tab toggle | |
+| sso_only | boolean | Yes | No | Security tab toggle | |
+| ip_allowlist_enabled | boolean | Yes | No | Security tab toggle | |
+| scim_enabled | boolean | Yes | No | Security tab toggle | |
+| ip_allowlist | JSON array[string] | Yes | No | Security tab | |
+| sso_provider | string(64) | No | No | Authentication (future) | |
+| sso_config | JSON object | Yes | No | Internal | |
+
+### 2.6 Organization access (join tables)
+
+**`organization_clusters`** — M2M org ↔ `web_discovery_clusters`
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| organization_id | UUID | Yes | PK part 1 |
+| cluster_id | UUID | Yes | PK part 2 · FK CASCADE both sides |
+| assigned_at | timestamptz | Yes | |
+
+**`organization_companies`** — org ↔ `companies` (**`UNIQUE(company_id)`** — one company, one org)
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| organization_id | UUID | Yes | PK part 1 |
+| company_id | UUID | Yes | PK part 2 · exclusive globally |
+| assigned_at | timestamptz | Yes | |
+
+### 2.7 Organization audit event
+
+Table: `organization_audit_events`
+
+| Field | Type | Required | Searchable | UI | Notes |
+|-------|------|----------|------------|-----|-------|
+| id | UUID | Yes | No | Internal | PK |
+| organization_id | UUID | Yes | No | Internal | FK CASCADE |
+| event_type | string(64) | Yes | No | Internal | e.g. `user.invited` |
+| title | string(255) | Yes | Yes | Activity tab | |
+| description | text | No | No | Activity tab | |
+| actor_label | string(255) | No | No | Internal | Default `admin` |
+| metadata | JSON object | Yes | No | Internal | |
+| created_at | timestamptz | Yes | Yes | Activity timestamp | |
+
+### 2.8 GM operator (not a table)
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| credential | `X-Admin-Token` header | Yes in prod | Env: `NORAD_ADMIN_TOKEN` · GM staff only |
 
 ---
 
@@ -544,19 +639,71 @@ Visual layer on top of Part I field tables and [P1-03](./P1-03.md) (relationship
 | 🔵 | Planned — in §9.2 only, not migrated |
 | ⬜ | View or derived — not a table |
 
-**MVP:** No `organizations` or `organization_id` until multi-tenant. **Single `runs` table** — `source_kind` discriminates Run vs deep research.
+**MVP:** Pipeline tables have no `organization_id` column. Tenant scoping is via **`organization_clusters`** and **`organization_companies`** assignment tables (migration `0012`). Read APIs do not enforce org scope yet. **Single `runs` table** — `source_kind` discriminates Run vs deep research.
 
-> §9.2 below includes **planned** tables (`article_signals`, `monitoring_rules`, etc.) for product reference. **§9.3 is the live schema** — **11 tables** on GCP Cloud SQL as of 2026-06-16. Field-level detail: Part I §2–§8.
+> §9.2 below includes **planned** tables (`article_signals`, `monitoring_rules`, `users`, etc.) for product reference. **§9.3 is the live schema** — **19 tables** on GCP Cloud SQL as of 2026-06-22. Field-level detail: Part I §2–§8.
 
 ### 9.2 Master schema — all tables (reference + planned)
+
+🟢 **Live since `0012`:** `organizations`, `organization_*` (8 tables). 🔵 **Planned only:** `users`, `article_signals`, `monitoring_rules`, `watchlist_entries`.
 
 ```mermaid
 erDiagram
     organizations {
         uuid id PK
         string name
-        string slug UK
+        string domain UK
+        string status "active | suspended"
         timestamptz created_at
+        timestamptz updated_at
+    }
+
+    organization_auth_config {
+        uuid organization_id PK FK
+        boolean mfa_enforced
+        boolean sso_only
+        boolean scim_enabled
+    }
+
+    organization_members {
+        uuid id PK
+        uuid organization_id FK
+        string email
+        string role "staff | manager"
+        string status "active | deactivated"
+    }
+
+    organization_invites {
+        uuid id PK
+        uuid organization_id FK
+        string email
+        string status "pending | accepted | expired"
+        string token_hash UK
+    }
+
+    organization_api_keys {
+        uuid id PK
+        uuid organization_id FK
+        string key_prefix
+        string key_hash UK
+        boolean is_active
+    }
+
+    organization_clusters {
+        uuid organization_id PK FK
+        uuid cluster_id PK FK
+    }
+
+    organization_companies {
+        uuid organization_id PK FK
+        uuid company_id PK FK "UNIQUE globally"
+    }
+
+    organization_audit_events {
+        uuid id PK
+        uuid organization_id FK
+        string event_type
+        string title
     }
 
     users {
@@ -693,10 +840,15 @@ erDiagram
         jsonb value
     }
 
-    organizations ||--o{ users : has
-    organizations ||--o{ web_discovery_clusters : owns
-    organizations ||--o{ companies : owns
-    organizations ||--o{ monitoring_rules : owns
+    organizations ||--|| organization_auth_config : "1:1"
+    organizations ||--o{ organization_members : has
+    organizations ||--o{ organization_invites : invites
+    organizations ||--o{ organization_api_keys : keys
+    organizations ||--o{ organization_audit_events : audits
+    organizations ||--o{ organization_clusters : scopes
+    organization_clusters }o--|| web_discovery_clusters : assigns
+    organizations ||--o{ organization_companies : scopes
+    organization_companies |o--|| companies : "exclusive"
 
     web_discovery_clusters ||--o{ web_discovery_queries : contains
 
@@ -724,9 +876,9 @@ erDiagram
     users ||--o{ watchlist_entries : promoted_by
 ```
 
-> §9.2 includes **planned** tables not in live DB. For exact FKs, ON DELETE rules, and all **11** production tables, use **§9.3**.
+> §9.2 includes **planned** tables not in live DB. For exact FKs, ON DELETE rules, and all **19** production tables, use **§9.3**.
 
-### 9.3 Current schema (live — 11 tables)
+### 9.3 Current schema (live — 19 tables)
 
 **Source of truth:** `apps/api/app/models/` · verified on GCP Cloud SQL Postgres.
 
@@ -864,6 +1016,74 @@ erDiagram
         timestamptz updated_at
     }
 
+    organizations {
+        uuid id PK
+        string name
+        string domain UK
+        string status "active | suspended"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    organization_auth_config {
+        uuid organization_id PK FK
+        boolean mfa_enforced
+        boolean sso_only
+        boolean scim_enabled
+        boolean ip_allowlist_enabled
+    }
+
+    organization_members {
+        uuid id PK
+        uuid organization_id FK
+        string email
+        string display_name
+        string role "staff | manager"
+        string team
+        string status "active | deactivated"
+        timestamptz joined_at
+    }
+
+    organization_invites {
+        uuid id PK
+        uuid organization_id FK
+        string email
+        string role "staff | manager"
+        string status "pending | accepted | expired"
+        string token_hash UK
+        timestamptz expires_at
+    }
+
+    organization_api_keys {
+        uuid id PK
+        uuid organization_id FK
+        string key_prefix
+        string key_hash UK
+        boolean is_active
+        timestamptz revoked_at
+    }
+
+    organization_clusters {
+        uuid organization_id PK FK
+        uuid cluster_id PK FK
+        timestamptz assigned_at
+    }
+
+    organization_companies {
+        uuid organization_id PK FK
+        uuid company_id PK FK
+        timestamptz assigned_at
+    }
+
+    organization_audit_events {
+        uuid id PK
+        uuid organization_id FK
+        string event_type
+        string title
+        text description
+        timestamptz created_at
+    }
+
     web_discovery_clusters ||--o{ web_discovery_queries : "cluster_id CASCADE"
     web_discovery_clusters ||--o{ articles : "cluster_id SET NULL"
     web_discovery_queries ||--o{ articles : "source_query_id SET NULL"
@@ -881,6 +1101,16 @@ erDiagram
     companies |o--o| cards : "canonical composite FK"
     cards ||--o{ sources : "card_id company_id composite"
     cards ||--o{ card_profile_parameters : "card_id company_id composite"
+
+    organizations ||--|| organization_auth_config : "1:1 CASCADE"
+    organizations ||--o{ organization_members : "organization_id CASCADE"
+    organizations ||--o{ organization_invites : "organization_id CASCADE"
+    organizations ||--o{ organization_api_keys : "organization_id CASCADE"
+    organizations ||--o{ organization_audit_events : "organization_id CASCADE"
+    organizations ||--o{ organization_clusters : "organization_id CASCADE"
+    organization_clusters }o--|| web_discovery_clusters : "cluster_id CASCADE"
+    organizations ||--o{ organization_companies : "organization_id CASCADE"
+    organization_companies |o--|| companies : "company_id UNIQUE exclusive"
 ```
 
 #### 9.3.2 Foreign-key reference (exact behaviour)
@@ -903,6 +1133,15 @@ erDiagram
 | `card_profile_parameters` | `(card_id, company_id)` | `cards(id, company_id)` | **CASCADE** | N:1 | **Composite FK** — see §9.6 |
 | `card_profile_parameters` | `company_id` | `companies.id` | **CASCADE** | N:1 | Single-column FK for cascade |
 | `companies` | `(canonical_card_id, id)` | `cards(id, company_id)` | **SET NULL** | 1:1 optional | **Composite FK** — accepted profile pointer |
+| `organization_auth_config` | `organization_id` | `organizations.id` | **CASCADE** | 1:1 | SSO/MFA policy row |
+| `organization_members` | `organization_id` | `organizations.id` | **CASCADE** | N:1 | Unique `(organization_id, email)` |
+| `organization_invites` | `organization_id` | `organizations.id` | **CASCADE** | N:1 | `token_hash` unique globally |
+| `organization_api_keys` | `organization_id` | `organizations.id` | **CASCADE** | N:1 | `key_hash` unique; one active per org (app logic) |
+| `organization_clusters` | `organization_id` | `organizations.id` | **CASCADE** | N:M | Composite PK with `cluster_id` |
+| `organization_clusters` | `cluster_id` | `web_discovery_clusters.id` | **CASCADE** | N:M | Same cluster can serve multiple orgs |
+| `organization_companies` | `organization_id` | `organizations.id` | **CASCADE** | N:M | Composite PK with `company_id` |
+| `organization_companies` | `company_id` | `companies.id` | **CASCADE** | 1:1 per company | **`UNIQUE(company_id)`** — exclusive org assignment |
+| `organization_audit_events` | `organization_id` | `organizations.id` | **CASCADE** | N:1 | Append-only activity feed |
 
 **No FK row (logical only):**
 
@@ -925,6 +1164,12 @@ erDiagram
 | `cards` | composite uniqueness | **`UNIQUE (id, company_id)`** — enables composite FKs on sources/profile params |
 | `card_profile_parameters` | one row per param per card | **`UNIQUE (card_id, param_key)`** (`0010`) |
 | `app_kv` | singleton keys | `key` (PK) |
+| `organizations` | tenant domain | `domain` (`0012`) |
+| `organization_members` | one email per org | **`UNIQUE (organization_id, email)`** (`0012`) |
+| `organization_invites` | invite token | `token_hash` (`0012`) |
+| `organization_api_keys` | key hash | `key_hash` (`0012`) |
+| `organization_companies` | one org per company | **`UNIQUE (company_id)`** (`0012`) |
+| `organization_invites` | one pending invite per email per org | partial unique on `(organization_id, lower(email))` WHERE `status = pending` (`0012`) |
 
 #### 9.3.4 `runs` polymorphism (same table, two pipelines)
 
@@ -949,8 +1194,16 @@ erDiagram
 | 9 | `run_events` | Both pipelines | `emit()` → SSE Activity feed |
 | 10 | `engine_calls` | Both pipelines | Every Exa / Anthropic / Parallel / Diffbot call |
 | 11 | `app_kv` | Settings | `PUT /api/settings/research` (`key = research_config`) |
+| 12 | `organizations` | GM Admin Console | `POST /api/admin/organizations` |
+| 13 | `organization_members` | Invite accept | `POST /api/invites/accept` |
+| 14 | `organization_invites` | GM Admin Console | `POST /api/admin/organizations/{id}/users` |
+| 15 | `organization_api_keys` | Org create / rotate | Auto on create; `POST .../integration-key/rotate` |
+| 16 | `organization_clusters` | Org Access tab | `POST .../clusters` |
+| 17 | `organization_companies` | Org Access tab | `POST .../companies` |
+| 18 | `organization_auth_config` | Org create (defaults) | `PATCH .../security` |
+| 19 | `organization_audit_events` | All org admin actions | `GET .../activity` |
 
-**Not in live DB (planned — see §9.2):** `article_signals`, `monitoring_rules`, `organizations`, `users`, `watchlist_entries`.
+**Not in live DB (planned — see §9.2):** `article_signals`, `monitoring_rules`, `users` (legacy generic user table), `watchlist_entries`.
 
 **Retired (dropped in `0007_drop_today_legacy.sql`):** `trend_articles`, `discovery_clusters`.
 
@@ -962,6 +1215,8 @@ erDiagram
 
 **Schema migration `0011_drop_signals.sql`:** drops `signals` table. Apply with **`norad_migrate`** user.
 
+**Schema migration `0012_organizations.sql`:** adds 8 organization tables (tenant admin layer). Apply with **`norad_migrate`** user. Spec: [ORG_USER_SETUP.md](../api/ORG_USER_SETUP.md).
+
 #### 9.3.6 Diagram notes
 
 1. **Composite FKs** on `companies.canonical_card_id`, `sources`, and `card_profile_parameters` prevent a card from one company being attached to another. Full detail: §9.6.
@@ -969,8 +1224,47 @@ erDiagram
 3. **`mentioned_companies`** is JSONB for the results UI **and** mirrored to **`companies` rows** with FK `source_article_id`. Each JSON object includes `company_id` after enrich. Deep Research can pass that id to upgrade the same row (`origin` → `research` on complete).
 4. **`cards.card`** is the full `CompanyCardV1` document; denormalized `score_*` columns are **legacy** (NULL on new cards); `profile_*` columns power completeness summary without parsing JSON.
 5. **`card_profile_parameters`** materializes the 44 must-have audit rows per card — `GET /api/research/companies/:id/profile-completeness` serves grouped params + summary.
+6. **Organization scoping** uses join tables `organization_clusters` and `organization_companies` — pipeline tables (`companies`, `web_discovery_clusters`) remain global rows. Read APIs do not filter by org yet.
 
 ### 9.4 Diagram by product area
+
+#### Organization admin (live — migration `0012`)
+
+```mermaid
+flowchart TB
+    subgraph GM["GM Admin Console · X-Admin-Token"]
+        ORG_UI[Organizations list + detail tabs]
+    end
+
+    subgraph OrgTables["Postgres — tenant layer"]
+        ORG[(organizations)]
+        AUTH[(organization_auth_config)]
+        MEM[(organization_members)]
+        INV[(organization_invites)]
+        KEY[(organization_api_keys)]
+        OC[(organization_clusters)]
+        OCO[(organization_companies)]
+        AUD[(organization_audit_events)]
+    end
+
+    subgraph Pipeline["Postgres — pipeline layer · global rows"]
+        CL[(web_discovery_clusters)]
+        CO[(companies)]
+    end
+
+    ORG_UI -->|CRUD| ORG
+    ORG_UI -->|invite / accept| INV
+    INV -->|POST /api/invites/accept| MEM
+    ORG --> AUTH
+    ORG --> KEY
+    ORG --> OC
+    ORG --> OCO
+    ORG --> AUD
+    OC -->|M2M assign| CL
+    OCO -->|exclusive assign| CO
+```
+
+GM staff manage orgs. Analyst users become `organization_members` after invite accept. Integration key in `organization_api_keys` is for the **future analyst frontend** — not wired on read APIs yet.
 
 #### Cluster → Query → Run
 
@@ -1255,9 +1549,10 @@ Analysts use the **same app and Postgres schema**. They read enriched Web Discov
 | Migration `0009` — companies ↔ articles FK documented (§9.3) |
 | Migration `0010` — `card_profile_parameters` + `cards.profile_*` documented (§4.6, §9.3) |
 | Migration `0011` — `signals` table dropped (§4.4, §9.3) |
+| Migration `0012` — organization tables in §9.3.1 ER diagram + §9.4 org flow |
 | Single-app analyst consumption (§10) |
 | CompanyCardV1 JSON deferred to `apps/api/app/schemas/` |
-| `organization_id` omitted per MVP decision |
+| Pipeline `organization_id` deferred — join-table scoping only |
 | `phase2test.md` — treat `article_signals` / Today as Phase 2 or retired |
 
 ---

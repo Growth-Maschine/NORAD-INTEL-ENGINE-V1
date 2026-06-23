@@ -109,11 +109,10 @@ monitoring_rules
 
 ### Not expected in MVP (post-MVP)
 
-These are documented in P1-04 diagrams but **should not** block Phase 2 if absent:
+These were documented in older P1-04 diagrams. **Updated 2026-06-22:** `organizations` and related tables (`organization_members`, etc.) **are live** — migration `0012`. Generic `users` and `watchlist_entries` remain post-MVP:
 
 ```text
-organizations
-users
+users                    # generic user table — NOT organization_members
 watchlist_entries
 ```
 

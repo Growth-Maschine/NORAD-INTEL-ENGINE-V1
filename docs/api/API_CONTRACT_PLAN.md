@@ -94,7 +94,8 @@ Env: `NORAD_ADMIN_TOKEN` (or `ADMIN_TOKEN`) on the API must match `X-Admin-Token
 
 ### Phase 3 — Multi-tenant platform
 
-- `organization_id` + tenant isolation
+- Enforce org scope on external read APIs (`/api/v1/research/*`) via integration key
+- `organization_id` on pipeline tables (optional — join tables exist today)
 - OAuth2 client credentials (if required over API keys)
 - Published SDKs + Postman collection
 - Status page + versioned API changelog
@@ -111,7 +112,7 @@ Request flow (target state). Items marked **live** exist today; others ship per 
 | 2 | **Request ID** | 1 | Planned | Generate or accept `X-Request-Id`; echo on response; log correlation |
 | 3 | **Access logging** | 1 | Planned | Structured JSON: method, path, status, latency_ms, request_id, client |
 | 4 | **Consumer auth** | 1 | Planned | `Authorization: Bearer <api_key>` or `X-API-Key` on `/api/v1/*` |
-| 5 | **Admin auth** | 0 | **Live** (partial) | `X-Admin-Token` + `require_admin` on all 5 cluster routes; settings writes |
+| 5 | **Admin auth** | 0 | **Live** (partial) | `X-Admin-Token` + `require_admin` on all 5 cluster routes; settings writes; **`/api/admin/organizations/*`** |
 | 6 | **Rate limiting** | 2 | Planned | Per API key (Redis); `429` + `Retry-After` + `RateLimit-*` headers |
 | 7 | **Route handlers** | — | **Live** | FastAPI routers |
 | 8 | **Error envelope** | 1 | Planned | Global exception handler; stable `error.type`, `error.code`, `request_id` |
@@ -127,6 +128,7 @@ BAT's Azure APIM may duplicate gateway duties (IP allow-list, JWT, rate limits).
 | Client | Surface | Phase | Header / credential | Scopes (target) | Env / config |
 |--------|---------|-------|---------------------|-----------------|--------------|
 | Admin cluster routes (all 5) | Internal | 0 | `X-Admin-Token` | n/a | `NORAD_ADMIN_TOKEN` |
+| Admin organizations (GM) | Internal | 0 | `X-Admin-Token` | n/a | `NORAD_ADMIN_TOKEN` — see [ORG_USER_SETUP.md](./ORG_USER_SETUP.md) |
 | Admin frontend (settings) | Internal | 0 | `X-Admin-Token` | n/a | `NORAD_ADMIN_TOKEN` |
 | Admin frontend (queries/runs) | Internal | 2 | `X-Admin-Token` | n/a | extend `require_admin` |
 | BAT BFF | External v1 | 1 | API key | `research:read`, `research:write` | `api_keys` table or env |
