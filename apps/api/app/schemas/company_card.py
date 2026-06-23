@@ -37,9 +37,6 @@ from app.schemas.tiers import (
 
 # Omitted from the synthesizer contract — BD signals/scores live on a future frontend.
 _SYNTHESIS_CONTRACT_EXCLUDED_TOP = ("signals", "scores")
-_CONTRACT_TOP_BLOCKS = [
-    b for b in _REQUIRED_TOP_BLOCKS if b not in _SYNTHESIS_CONTRACT_EXCLUDED_TOP
-]
 
 # Top-level blocks that we require engines to return (even if empty objects).
 # Forces structure on the JSON output contract — engines can't omit a block.
@@ -62,6 +59,10 @@ _REQUIRED_TOP_BLOCKS = [
     "signals",
     "scores",
     "sources_and_confidence",
+]
+
+_CONTRACT_TOP_BLOCKS = [
+    b for b in _REQUIRED_TOP_BLOCKS if b not in _SYNTHESIS_CONTRACT_EXCLUDED_TOP
 ]
 
 

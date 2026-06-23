@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import get_settings
 from app.core.db import get_session_factory
 from app.core.orphan_sweeper import sweep_orphan_runs
-from app.routers import engines, events, health, research, schemas, web_discovery
+from app.routers import admin_organizations, engines, events, health, research, schemas, web_discovery
 from app.routers import settings as settings_router
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,8 @@ def create_app() -> FastAPI:
     app.include_router(web_discovery.router)
     app.include_router(research.router)
     app.include_router(settings_router.router)
+    app.include_router(admin_organizations.router)
+    app.include_router(admin_organizations.invite_router)
 
     # ── Frontend (production)
     # In production the Vite build is sitting at apps/web/dist. We mount it
