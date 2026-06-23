@@ -2,23 +2,18 @@
 
 Usage:
   cd apps/api && CORS_ORIGINS='["http://localhost:5173"]' \
-    .venv/bin/python scripts/backfill_card_profile_parameters.py
+    .venv/bin/python -m app.maintenance.backfill_card_profile_parameters
 """
 from __future__ import annotations
 
 import asyncio
-import sys
-from pathlib import Path
 
-API_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(API_ROOT))
+from sqlalchemy import select
 
-from sqlalchemy import select  # noqa: E402
-
-from app.core.db import get_session_factory  # noqa: E402
-from app.models import Card  # noqa: E402
-from app.services.card_profile_parameters import persist_card_profile_parameters_sync  # noqa: E402
-from app.services.profile_completeness import CATALOG_PARAM_COUNT  # noqa: E402
+from app.core.db import get_session_factory
+from app.models import Card, CardProfileParameter
+from app.services.card_profile_parameters import persist_card_profile_parameters_sync
+from app.services.profile_completeness import CATALOG_PARAM_COUNT
 
 
 async def main() -> None:
@@ -31,7 +26,6 @@ async def main() -> None:
             if not card.card:
                 skipped += 1
                 continue
-            from app.models import CardProfileParameter
 
             existing = (
                 await session.execute(

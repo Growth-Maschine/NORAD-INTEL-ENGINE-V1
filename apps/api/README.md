@@ -7,7 +7,7 @@ FastAPI backend for the NORAD brand intelligence engine.
 ```bash
 cd apps/api
 pip install -r requirements.txt
-python scripts/dev.py
+python dev.py
 ```
 
 Uses port **8000** when free, otherwise the next available port (prints the URL).
@@ -29,7 +29,7 @@ separate worker process.
 ## Layout
 
 ```
-app/
+app/                     # Runtime — imported by uvicorn
 ├── main.py              # FastAPI app + router mounting + SPA fallback
 ├── core/                # config, db, redis, pipeline log, orphan sweeper
 ├── engines/             # Exa, Claude, Parallel, Diffbot clients
@@ -37,12 +37,17 @@ app/
 ├── routers/             # HTTP surface
 ├── schemas/             # CompanyCardV1 contract
 ├── services/            # research, web_discovery, run_events, settings
+├── maintenance/         # Manual DB jobs (not loaded at API startup)
 └── utils/
 sql/                     # Versioned DDL — apply with psql
-scripts/
-├── dev.py               # Local uvicorn launcher
-├── dev_port.py          # Port picker (used by dev.py)
-└── backfill_card_profile_parameters.py
+tests/                   # Pytest suite
+dev.py                   # Local uvicorn launcher
+```
+
+**Maintenance jobs** (run from `apps/api`):
+
+```bash
+python -m app.maintenance.backfill_card_profile_parameters
 ```
 
 DDL workflow: see `docs/backend-pipeline.md` and `apps/api/sql/`.  

@@ -517,7 +517,7 @@ One row per **must-have profile parameter** per card (44 rows per `CompanyCardV1
 
 **Completeness % formula:** `round((verified + uncertain × 0.5) / 44 × 100)` — stored on `cards.profile_completeness_pct`.
 
-**Backfill:** `apps/api/scripts/backfill_card_profile_parameters.py` for cards created before migration `0010`.
+**Backfill:** `python -m app.maintenance.backfill_card_profile_parameters` (from `apps/api`) for cards created before migration `0010`.
 
 ---
 

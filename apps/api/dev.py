@@ -3,18 +3,25 @@
 from __future__ import annotations
 
 import os
+import socket
 import subprocess
 import sys
 from pathlib import Path
 
-SCRIPTS_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(SCRIPTS_DIR))
 
-from dev_port import find_free_port  # noqa: E402
+def find_free_port(*, start: int = 8000, max_tries: int = 100) -> int:
+    for port in range(start, start + max_tries):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                sock.bind(("0.0.0.0", port))
+            except OSError:
+                continue
+            return port
+    raise RuntimeError(f"no free port in range {start}–{start + max_tries - 1}")
 
 
 def main() -> None:
-    api_dir = Path(__file__).resolve().parents[1]
+    api_dir = Path(__file__).resolve().parent
     os.chdir(api_dir)
 
     port = find_free_port(start=8000)

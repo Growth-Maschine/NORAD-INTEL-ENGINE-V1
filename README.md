@@ -8,7 +8,10 @@ Brand intelligence and BD deal-sourcing engine. Built by Growth Maschine.
 norad/
 ├── apps/
 │   ├── api/             FastAPI backend (Python 3.11, port 8000)
-│   │   └── scripts/     Dev launcher + DB maintenance scripts
+│   │   ├── app/         Runtime code (routers, models, services)
+│   │   ├── sql/         Versioned DDL migrations
+│   │   ├── tests/       Pytest suite
+│   │   └── dev.py       Local dev server entrypoint
 │   └── web/             React + Vite + TypeScript + Tailwind (port 5000)
 ├── docs/
 │   ├── strategy/        Blueprint, plan, stack, cost research
@@ -29,7 +32,7 @@ Use **two terminals**. If a port is already in use, dev servers pick the next fr
 ```bash
 cd apps/api
 pip install -r requirements.txt
-python scripts/dev.py
+python dev.py
 ```
 
 Opens on **8000** when free, otherwise **8001**, **8002**, … — the terminal prints the URL.  
@@ -49,7 +52,7 @@ Opens on **5000** when free, otherwise **5001**, **5002**, … — Vite prints t
 ### One-liners (from repo root)
 
 ```bash
-cd apps/api && python scripts/dev.py
+cd apps/api && python dev.py
 cd apps/web && npm run dev
 ```
 
