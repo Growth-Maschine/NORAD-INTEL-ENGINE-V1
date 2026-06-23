@@ -22,11 +22,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.admin_auth import require_admin
 from app.core.config import get_settings
 from app.core.db import get_session
 from app.models import Article, Card, CardProfileParameter, Company, Run, Source, WebDiscoveryCluster
@@ -35,15 +36,11 @@ from app.services.company_evidence import get_company_evidence
 from app.services.research import ResearchParams, execute_research
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/api/research", tags=["research"])
-
-
-# ── Admin gate (same as discovery) ───────────────────────────────────────────
-
-
-def _require_admin_in_prod(x_admin_token: str | None) -> None:
-    """Admin gate disabled — single-user tool, open in all environments."""
-    return
+router = APIRouter(
+    prefix="/api/research",
+    tags=["research"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
@@ -200,10 +197,8 @@ class CompanyFeedRow(BaseModel):
 @router.post("/runs", response_model=ResearchRunCreated, status_code=202)
 async def create_research_run(
     body: ResearchRunRequest,
-    x_admin_token: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> ResearchRunCreated:
-    _require_admin_in_prod(x_admin_token)
 
     company_id = body.company_id
     company_name = body.company_name.strip()
@@ -297,7 +292,6 @@ _CANCELLABLE_STATUSES = {"queued", "researching", "synthesizing"}
 @router.post("/runs/{run_id}/cancel", response_model=RunStatus)
 async def cancel_research_run(
     run_id: uuid.UUID,
-    x_admin_token: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> RunStatus:
     """Soft-cancel a research run. Marks status='cancelled' and completed_at=now.
@@ -308,8 +302,6 @@ async def cancel_research_run(
     of the Profile history list, and the orphan sweeper cleans up any stale
     artifacts in the background.
     """
-    _require_admin_in_prod(x_admin_token)
-
     run = await session.get(Run, run_id)
     if run is None:
         raise HTTPException(404, "run not found")

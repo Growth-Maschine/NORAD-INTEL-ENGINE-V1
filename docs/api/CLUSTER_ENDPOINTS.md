@@ -16,21 +16,13 @@ Base path: `/api/web-discovery`
 | `PUT` | `/clusters/{id}` | Edit cluster | `X-Admin-Token` |
 | `DELETE` | `/clusters/{id}` | Delete cluster | `X-Admin-Token` |
 
-**Phase 0 scope only.** Queries, runs, articles under `/api/web-discovery/*` are untouched — no admin gate yet.
+**All `/api/web-discovery/*` routes** require `X-Admin-Token` when `DEBUG=false` (queries, runs, articles included). Same for **`/api/research/*`**.
 
 ---
 
 ## What changed (code)
 
-All **5 cluster** routes use `app/core/admin_auth.require_admin`:
-
-- `GET /clusters`
-- `GET /clusters/{id}`
-- `POST /clusters`
-- `PUT /clusters/{id}`
-- `DELETE /clusters/{id}`
-
-Nothing else was changed. Settings and other routers were not touched.
+The **web-discovery** and **research** routers use router-level `app/core/admin_auth.require_admin` — every route on those routers, including clusters, queries, runs, articles, companies, and cards.
 
 ---
 

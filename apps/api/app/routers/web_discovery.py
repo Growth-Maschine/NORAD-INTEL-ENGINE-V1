@@ -7,7 +7,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,13 +28,12 @@ from app.services.web_discovery import (
 )
 from app.utils.slug import slugify
 
-router = APIRouter(prefix="/api/web-discovery", tags=["web-discovery"])
+router = APIRouter(
+    prefix="/api/web-discovery",
+    tags=["web-discovery"],
+    dependencies=[Depends(require_admin)],
+)
 logger = logging.getLogger(__name__)
-
-
-def _require_admin_in_prod(x_admin_token: str | None) -> None:
-    """Admin gate disabled — single-user tool, open in all environments."""
-    return
 
 
 def _clean_items(items: list[str]) -> list[str]:
@@ -412,7 +411,6 @@ def _query_out(q: WebDiscoveryQuery) -> WebDiscoveryQueryOut:
 @router.get("/clusters", response_model=WebDiscoveryClusterList)
 async def list_web_discovery_clusters(
     session: AsyncSession = Depends(get_session),
-    _: None = Depends(require_admin),
 ) -> WebDiscoveryClusterList:
     stmt = (
         select(WebDiscoveryCluster, func.count(WebDiscoveryQuery.id))
@@ -434,7 +432,6 @@ async def list_web_discovery_clusters(
 async def create_web_discovery_cluster(
     body: WebDiscoveryClusterIn,
     session: AsyncSession = Depends(get_session),
-    _: None = Depends(require_admin),
 ) -> WebDiscoveryClusterOut:
     slug = slugify(body.name)
     conflict = (
@@ -464,7 +461,6 @@ async def create_web_discovery_cluster(
 async def get_web_discovery_cluster(
     cluster_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-    _: None = Depends(require_admin),
 ) -> WebDiscoveryClusterOut:
     cluster = await session.get(WebDiscoveryCluster, cluster_id)
     if cluster is None:
@@ -482,7 +478,6 @@ async def update_web_discovery_cluster(
     cluster_id: uuid.UUID,
     body: WebDiscoveryClusterIn,
     session: AsyncSession = Depends(get_session),
-    _: None = Depends(require_admin),
 ) -> WebDiscoveryClusterOut:
     cluster = await session.get(WebDiscoveryCluster, cluster_id)
     if cluster is None:
@@ -523,7 +518,6 @@ async def update_web_discovery_cluster(
 async def delete_web_discovery_cluster(
     cluster_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
-    _: None = Depends(require_admin),
 ) -> dict[str, bool]:
     cluster = await session.get(WebDiscoveryCluster, cluster_id)
     if cluster is None:
@@ -537,10 +531,8 @@ async def delete_web_discovery_cluster(
 async def start_web_discovery_cluster_run(
     cluster_id: uuid.UUID,
     body: WebDiscoveryRunStartIn | None = None,
-    x_admin_token: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> WebDiscoveryRunCreated:
-    _require_admin_in_prod(x_admin_token)
     cluster = await session.get(WebDiscoveryCluster, cluster_id)
     if cluster is None:
         raise HTTPException(404, "web discovery cluster not found")
@@ -696,10 +688,8 @@ async def list_web_discovery_queries(
 async def create_web_discovery_query(
     cluster_id: uuid.UUID,
     body: WebDiscoveryQueryIn,
-    x_admin_token: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> WebDiscoveryQueryOut:
-    _require_admin_in_prod(x_admin_token)
     cluster = await session.get(WebDiscoveryCluster, cluster_id)
     if cluster is None:
         raise HTTPException(404, "web discovery cluster not found")
@@ -1017,10 +1007,8 @@ async def get_web_discovery_query_results(
 async def update_web_discovery_query(
     query_id: uuid.UUID,
     body: WebDiscoveryQueryIn,
-    x_admin_token: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> WebDiscoveryQueryOut:
-    _require_admin_in_prod(x_admin_token)
     row = await session.get(WebDiscoveryQuery, query_id)
     if row is None:
         raise HTTPException(404, "web discovery query not found")
@@ -1065,10 +1053,8 @@ async def update_web_discovery_query(
 @router.delete("/queries/{query_id}")
 async def delete_web_discovery_query(
     query_id: uuid.UUID,
-    x_admin_token: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, bool]:
-    _require_admin_in_prod(x_admin_token)
     row = await session.get(WebDiscoveryQuery, query_id)
     if row is None:
         return {"ok": True}
@@ -1157,10 +1143,8 @@ async def get_article(
 @router.post("/articles/{article_id}/dismiss", response_model=ArticleOut)
 async def dismiss_article(
     article_id: uuid.UUID,
-    x_admin_token: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> ArticleOut:
-    _require_admin_in_prod(x_admin_token)
     row = await session.get(Article, article_id)
     if row is None:
         raise HTTPException(404, "article not found")
