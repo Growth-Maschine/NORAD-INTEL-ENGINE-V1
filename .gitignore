@@ -21,6 +21,7 @@ dist/
 .DS_Store
 .idea/
 .vscode/
+.cursor/
 
 # ── Replit-specific (don't ship to GitHub) ─────────────────────────────────
 .replit
